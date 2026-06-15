@@ -401,6 +401,96 @@ select {
   font-size: 28px;
 }
 
+.development-notes-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 420px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.development-note-entry {
+  padding: 16px;
+}
+
+.development-note-form {
+  display: grid;
+  gap: 12px;
+}
+
+.development-note-form textarea {
+  width: 100%;
+  min-height: 140px;
+  resize: vertical;
+}
+
+.development-note-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.development-notes-list {
+  display: grid;
+  gap: 10px;
+}
+
+.development-note-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-left: 5px solid #8fa39b;
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.development-note-card.is-implemented {
+  border-left-color: var(--ok);
+}
+
+.development-note-card.is-rejected {
+  border-left-color: var(--danger);
+}
+
+.development-note-header,
+.development-note-status-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.development-note-meta {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.development-note-card p {
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.note-status {
+  text-transform: capitalize;
+}
+
+.note-status.implemented {
+  background: #dff1e7;
+  color: var(--ok);
+}
+
+.note-status.rejected {
+  background: #fde3df;
+  color: var(--danger);
+}
+
+.empty-state {
+  padding: 16px;
+}
+
 .section-heading {
   display: flex;
   align-items: center;
@@ -871,6 +961,7 @@ dd {
   .kpi-grid,
   .dashboard-grid,
   .project-metrics,
+  .development-notes-layout,
   .admin-grid,
   .procurement-board,
   .source-grid {

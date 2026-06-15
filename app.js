@@ -35,6 +35,7 @@ const state = {
     suppliers: [],
     statuses: [],
   },
+  developmentNotes: [],
   userInitials: "",
   supabaseClient: null,
   cloudReady: false,
@@ -42,7 +43,7 @@ const state = {
   adminListsLoadedFromCloud: false,
 };
 
-const VALID_VIEWS = new Set(["dashboard", "log", "procurement", "admin"]);
+const VALID_VIEWS = new Set(["dashboard", "log", "procurement", "development", "admin"]);
 const AUTOCOMPLETE_FILTERS = new Set([FIELD.provider, FIELD.area, FIELD.room, FIELD.status]);
 const COLUMN_PREF_KEY = "equipmentMaterialHiddenColumns";
 const LOG_FILTER_PREF_KEY = "equipmentMaterialLogColumnFilters";
@@ -56,6 +57,7 @@ const ROW_ORDER_PREF_KEY = "equipmentMaterialRowOrder";
 const PROJECTS_PREF_KEY = "equipmentMaterialProjects";
 const ACTIVE_PROJECT_PREF_KEY = "equipmentMaterialActiveProject";
 const PROJECT_ROWS_PREFIX = "equipmentMaterialProjectRows:";
+const DEVELOPMENT_NOTES_PREF_KEY = "equipmentMaterialDevelopmentNotes";
 
 const els = {
   viewTitle: document.querySelector("#view-title"),
@@ -81,6 +83,11 @@ const els = {
   logHead: document.querySelector("#logHead"),
   logBody: document.querySelector("#logBody"),
   procurementBoard: document.querySelector("#procurementBoard"),
+  developmentNoteForm: document.querySelector("#developmentNoteForm"),
+  developmentNoteInput: document.querySelector("#developmentNoteInput"),
+  developmentNoteInitials: document.querySelector("#developmentNoteInitials"),
+  developmentNotesList: document.querySelector("#developmentNotesList"),
+  developmentNotesCount: document.querySelector("#developmentNotesCount"),
   projectForm: document.querySelector("#projectForm"),
   projectInput: document.querySelector("#projectInput"),
   projectList: document.querySelector("#projectList"),
@@ -180,6 +187,7 @@ function collectSharedState() {
     projects: state.projects,
     rowsByProject: state.rowsByProject,
     adminLists: state.adminLists,
+    developmentNotes: state.developmentNotes,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -209,6 +217,7 @@ async function loadSharedState() {
       state.projects = Array.isArray(shared.projects) && shared.projects.length ? shared.projects : state.projects;
       state.rowsByProject = shared.rowsByProject || {};
       state.adminLists = shared.adminLists || state.adminLists;
+      state.developmentNotes = Array.isArray(shared.developmentNotes) ? shared.developmentNotes : [];
       state.adminListsLoadedFromCloud = Boolean(shared.adminLists);
       setSyncStatus("Shared database connected", "cloud");
     } else {
@@ -246,6 +255,7 @@ async function maybeMigrateLocalStorageToSupabase() {
     state.projects = localState.projects;
     state.rowsByProject = localState.rowsByProject;
     state.adminLists = localState.adminLists;
+    state.developmentNotes = localState.developmentNotes || [];
     state.adminListsLoadedFromCloud = true;
     state.cloudReady = true;
     setSyncStatus("Local data migrated to shared database", "cloud");
@@ -363,6 +373,7 @@ function collectLocalStorageSharedState() {
     projects: normalizedProjects,
     rowsByProject,
     adminLists,
+    developmentNotes: safeJsonParse(localStorage.getItem(DEVELOPMENT_NOTES_PREF_KEY), []),
     updatedAt: new Date().toISOString(),
     migratedFromLocalStorage: true,
   };
@@ -951,6 +962,53 @@ function appendNote(row) {
   renderLog();
   renderDashboard();
   renderProcurement();
+}
+
+function developmentNoteCounts() {
+  return state.developmentNotes.reduce((counts, note) => {
+    const status = note.status || "open";
+    counts[status] = (counts[status] || 0) + 1;
+    return counts;
+  }, { open: 0, implemented: 0, rejected: 0 });
+}
+
+function saveDevelopmentNotes() {
+  localStorage.setItem(DEVELOPMENT_NOTES_PREF_KEY, JSON.stringify(state.developmentNotes));
+  queueSharedSave();
+}
+
+function loadDevelopmentNotes() {
+  if (state.cloudReady) return;
+  state.developmentNotes = safeJsonParse(localStorage.getItem(DEVELOPMENT_NOTES_PREF_KEY), []);
+}
+
+function addDevelopmentNote(text, initials) {
+  const noteText = clean(text);
+  if (!noteText) return;
+  const author = clean(initials || state.userInitials).toUpperCase() || "USER";
+  state.developmentNotes.unshift({
+    id: `dev-${Date.now()}-${Math.floor(Math.random() * 1000000)}`,
+    text: noteText,
+    initials: author,
+    createdAt: new Date().toISOString(),
+    status: "open",
+  });
+  state.userInitials = author === "USER" ? state.userInitials : author;
+  if (state.userInitials) {
+    localStorage.setItem(INITIALS_PREF_KEY, state.userInitials);
+    if (els.userInitialsInput) els.userInitialsInput.value = state.userInitials;
+  }
+  saveDevelopmentNotes();
+  renderDevelopmentNotes();
+}
+
+function updateDevelopmentNoteStatus(noteId, status) {
+  const note = state.developmentNotes.find((item) => item.id === noteId);
+  if (!note) return;
+  note.status = status;
+  note.resolvedAt = status === "open" ? "" : new Date().toISOString();
+  saveDevelopmentNotes();
+  renderDevelopmentNotes();
 }
 
 function uniqueSorted(values) {
@@ -1637,6 +1695,45 @@ function renderProcurement() {
   }).join("");
 }
 
+function renderDevelopmentNotes() {
+  const notes = [...state.developmentNotes].sort((a, b) => {
+    const statusOrder = { open: 0, implemented: 1, rejected: 2 };
+    const statusA = statusOrder[a.status || "open"] ?? 0;
+    const statusB = statusOrder[b.status || "open"] ?? 0;
+    if (statusA !== statusB) return statusA - statusB;
+    return clean(b.createdAt).localeCompare(clean(a.createdAt));
+  });
+  const counts = developmentNoteCounts();
+  els.developmentNotesCount.textContent = `${notes.length} notes - ${counts.open || 0} open`;
+  els.developmentNoteInitials.value = state.userInitials;
+  els.developmentNotesList.innerHTML = notes.map((note) => {
+    const status = note.status || "open";
+    const created = note.createdAt ? formatNoteTimestamp(new Date(note.createdAt)) : "";
+    const resolved = note.resolvedAt ? formatNoteTimestamp(new Date(note.resolvedAt)) : "";
+    return `
+      <article class="development-note-card is-${escapeHtml(status)}">
+        <div class="development-note-header">
+          <span class="badge note-status ${escapeHtml(status)}">${escapeHtml(status)}</span>
+          <span class="development-note-meta">${escapeHtml([created, note.initials].filter(Boolean).join(" - "))}</span>
+        </div>
+        <p>${escapeHtml(note.text)}</p>
+        ${resolved ? `<div class="meta">Updated: ${escapeHtml(resolved)}</div>` : ""}
+        <div class="development-note-status-actions">
+          <button class="text-button neutral" type="button" data-note-status="implemented" data-note-id="${escapeHtml(note.id)}">Implemented</button>
+          <button class="text-button" type="button" data-note-status="rejected" data-note-id="${escapeHtml(note.id)}">Rejected</button>
+          ${status !== "open" ? `<button class="text-button neutral" type="button" data-note-status="open" data-note-id="${escapeHtml(note.id)}">Reopen</button>` : ""}
+        </div>
+      </article>
+    `;
+  }).join("") || `<section class="panel empty-state"><p class="empty">No development notes yet.</p></section>`;
+
+  document.querySelectorAll("[data-note-status]").forEach((button) => {
+    button.addEventListener("click", () => {
+      updateDevelopmentNoteStatus(button.dataset.noteId, button.dataset.noteStatus);
+    });
+  });
+}
+
 function renderAdminList(target, listName, values) {
   target.innerHTML = values.map((value) => `
     <div class="admin-row">
@@ -1696,6 +1793,7 @@ function render() {
   renderDashboard();
   renderLog();
   renderProcurement();
+  renderDevelopmentNotes();
   renderAdmin();
 }
 
@@ -1716,11 +1814,12 @@ function setView(view) {
     dashboard: "Dashboard",
     log: "Material Log",
     procurement: "Procurement",
+    development: "Development Notes",
     admin: "Admin",
   }[view];
   const showColumnControls = view === "log";
   document.querySelector(".column-controls").style.display = showColumnControls ? "flex" : "none";
-  document.querySelector(".filters").style.display = view === "admin" ? "none" : "grid";
+  document.querySelector(".filters").style.display = ["admin", "development"].includes(view) ? "none" : "grid";
   if (!showColumnControls) {
     els.columnMenu.hidden = true;
     els.columnToggle.setAttribute("aria-expanded", "false");
@@ -1747,6 +1846,7 @@ async function init() {
     saveCurrentProjectRows();
   }
   loadAdminLists();
+  loadDevelopmentNotes();
   state.userInitials = clean(localStorage.getItem(INITIALS_PREF_KEY)).toUpperCase();
   state.filtered = state.rows;
   const initialView = location.hash.slice(1) || localStorage.getItem("equipmentMaterialActiveView") || "dashboard";
@@ -1805,6 +1905,12 @@ async function init() {
   els.downloadTemplate.addEventListener("click", downloadImportTemplate);
 
   els.importLog.addEventListener("click", importMaterialLog);
+
+  els.developmentNoteForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    addDevelopmentNote(els.developmentNoteInput.value, els.developmentNoteInitials.value);
+    els.developmentNoteInput.value = "";
+  });
 
   els.projectSelect.addEventListener("change", () => {
     saveCurrentProjectRows();

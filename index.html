@@ -21,6 +21,7 @@
           <button class="nav-tab is-active" data-view="dashboard" type="button">Dashboard</button>
           <button class="nav-tab" data-view="log" type="button">Material Log</button>
           <button class="nav-tab" data-view="procurement" type="button">Procurement</button>
+          <button class="nav-tab" data-view="development" type="button">Development Notes</button>
           <button class="nav-tab" data-view="admin" type="button">Admin</button>
         </nav>
 
@@ -104,6 +105,29 @@
 
         <section class="view" id="procurementView">
           <div class="procurement-board" id="procurementBoard"></div>
+        </section>
+
+        <section class="view" id="developmentView">
+          <div class="development-notes-layout">
+            <section class="panel development-note-entry">
+              <div class="section-heading">
+                <h3>Add Development Note</h3>
+                <span id="developmentNotesCount"></span>
+              </div>
+              <form id="developmentNoteForm" class="development-note-form">
+                <textarea id="developmentNoteInput" rows="4" placeholder="Enter a development note or requested change"></textarea>
+                <div class="development-note-actions">
+                  <label>
+                    Initials
+                    <input id="developmentNoteInitials" type="text" maxlength="6" placeholder="JB" />
+                  </label>
+                  <button class="ghost-button" type="submit">Add Note</button>
+                </div>
+              </form>
+            </section>
+
+            <section class="development-notes-list" id="developmentNotesList" aria-live="polite"></section>
+          </div>
         </section>
 
         <section class="view" id="adminView">
