@@ -340,8 +340,13 @@ function collectLocalStorageSharedState() {
 
   const rowsByProject = {};
   normalizedProjects.forEach((project) => {
-    rowsByProject[project.id] = projectRowsFromStorage(project.id)
-      || (project.baseline ? legacyBaselineRowsFromStorage() : []);
+    const localRows = projectRowsFromStorage(project.id);
+    rowsByProject[project.id] = localRows?.length
+      ? localRows
+      : (project.baseline ? legacyBaselineRowsFromStorage() : []);
+    if (project.baseline && !rowsByProject[project.id].length) {
+      rowsByProject[project.id] = state.baseRows.map((row) => ({ ...row }));
+    }
   });
 
   let adminLists = safeJsonParse(localStorage.getItem(ADMIN_PREF_KEY), null);
