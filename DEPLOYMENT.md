@@ -24,9 +24,9 @@ For the fastest non-technical test, use Netlify Drop:
 
 ## Important Data Note
 
-The current app stores edits, projects, archived projects, imported logs, notes, and admin lists in each user's browser local storage.
+The app can store shared project data in Supabase. If `supabase-config.js` is blank or Supabase is unavailable, it falls back to local browser storage.
 
-That means:
+Local fallback means:
 
 - The app can be shared for interface testing immediately.
 - Each tester's edits are private to their own browser.
@@ -35,13 +35,12 @@ That means:
 
 ## Shared Updating Version
 
-For real shared testing where multiple users update the same project data, the app needs a hosted data layer.
+For shared testing where multiple users update the same project data:
 
-Good next step:
-
-- Add Supabase or Firebase for shared projects, material log rows, admin lists, and notes.
-- Add simple user identity or initials.
-- Keep Excel import/export in the browser.
+1. Create a Supabase project.
+2. Run `supabase-schema.sql` in the Supabase SQL Editor.
+3. Add the project URL and anon key to `supabase-config.js`.
+4. Commit and push the config update to GitHub.
 
 ## Deployment Package Contents
 

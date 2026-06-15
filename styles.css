@@ -157,6 +157,21 @@ p {
   margin-bottom: 6px;
 }
 
+.sync-status {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sync-status[data-mode="cloud"] {
+  color: var(--ok);
+}
+
+.sync-status[data-mode="pending"] {
+  color: var(--warn);
+}
+
 #view-title {
   font-size: 30px;
   line-height: 1.1;

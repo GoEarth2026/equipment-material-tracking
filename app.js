@@ -22,6 +22,7 @@ const state = {
   data: null,
   rows: [],
   baseRows: [],
+  rowsByProject: {},
   filtered: [],
   projects: [],
   activeProjectId: "hampton-wwtp-phase-ii",
@@ -35,6 +36,10 @@ const state = {
     statuses: [],
   },
   userInitials: "",
+  supabaseClient: null,
+  cloudReady: false,
+  cloudSaveTimer: null,
+  adminListsLoadedFromCloud: false,
 };
 
 const VALID_VIEWS = new Set(["dashboard", "log", "procurement", "admin"]);
@@ -54,6 +59,7 @@ const PROJECT_ROWS_PREFIX = "equipmentMaterialProjectRows:";
 
 const els = {
   viewTitle: document.querySelector("#view-title"),
+  syncStatus: document.querySelector("#syncStatus"),
   projectSelect: document.querySelector("#projectSelect"),
   search: document.querySelector("#searchInput"),
   status: document.querySelector("#statusFilter"),
@@ -144,8 +150,109 @@ function defaultProjects() {
   }];
 }
 
+function setSyncStatus(message, mode = "local") {
+  if (!els.syncStatus) return;
+  els.syncStatus.textContent = message;
+  els.syncStatus.dataset.mode = mode;
+}
+
+function projectRowsFromStorage(projectId) {
+  const savedRows = localStorage.getItem(projectRowsKey(projectId));
+  if (savedRows) {
+    try {
+      return JSON.parse(savedRows);
+    } catch {
+      localStorage.removeItem(projectRowsKey(projectId));
+    }
+  }
+  return null;
+}
+
+function collectSharedState() {
+  state.rowsByProject[state.activeProjectId] = state.rows;
+  state.projects.forEach((project) => {
+    if (!state.rowsByProject[project.id]) {
+      state.rowsByProject[project.id] = projectRowsFromStorage(project.id)
+        || (project.baseline ? state.baseRows.map((row) => ({ ...row })) : []);
+    }
+  });
+  return {
+    projects: state.projects,
+    rowsByProject: state.rowsByProject,
+    adminLists: state.adminLists,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function initializeSupabase() {
+  const config = window.EQUIPMENT_TRACKING_SUPABASE || {};
+  if (!config.url || !config.anonKey || !window.supabase?.createClient) {
+    setSyncStatus("Local mode - Supabase not configured", "local");
+    return;
+  }
+  state.supabaseClient = window.supabase.createClient(config.url, config.anonKey);
+  setSyncStatus("Connecting to Supabase...", "pending");
+}
+
+async function loadSharedState() {
+  if (!state.supabaseClient) return false;
+  try {
+    const { data, error } = await state.supabaseClient
+      .from("equipment_material_app_state")
+      .select("data")
+      .eq("id", "main")
+      .maybeSingle();
+    if (error) throw error;
+
+    if (data?.data) {
+      const shared = data.data;
+      state.projects = Array.isArray(shared.projects) && shared.projects.length ? shared.projects : state.projects;
+      state.rowsByProject = shared.rowsByProject || {};
+      state.adminLists = shared.adminLists || state.adminLists;
+      state.adminListsLoadedFromCloud = Boolean(shared.adminLists);
+      setSyncStatus("Shared database connected", "cloud");
+    } else {
+      state.rowsByProject = {
+        [defaultProjects()[0].id]: state.baseRows.map((row) => ({ ...row })),
+      };
+      await saveSharedState();
+      setSyncStatus("Shared database initialized", "cloud");
+    }
+    state.cloudReady = true;
+    return true;
+  } catch (error) {
+    console.error(error);
+    setSyncStatus("Local mode - Supabase connection failed", "local");
+    state.supabaseClient = null;
+    return false;
+  }
+}
+
+function queueSharedSave() {
+  if (!state.supabaseClient || !state.cloudReady) return;
+  clearTimeout(state.cloudSaveTimer);
+  state.cloudSaveTimer = setTimeout(() => {
+    saveSharedState();
+  }, 500);
+}
+
+async function saveSharedState() {
+  if (!state.supabaseClient) return;
+  try {
+    const { error } = await state.supabaseClient
+      .from("equipment_material_app_state")
+      .upsert({ id: "main", data: collectSharedState() });
+    if (error) throw error;
+    setSyncStatus("Shared database saved", "cloud");
+  } catch (error) {
+    console.error(error);
+    setSyncStatus("Shared database save failed", "local");
+  }
+}
+
 function saveProjects() {
   localStorage.setItem(PROJECTS_PREF_KEY, JSON.stringify(state.projects));
+  queueSharedSave();
 }
 
 function loadProjects() {
@@ -166,10 +273,15 @@ function activeProject() {
 }
 
 function saveCurrentProjectRows() {
+  state.rowsByProject[state.activeProjectId] = state.rows;
   localStorage.setItem(projectRowsKey(), JSON.stringify(state.rows));
+  queueSharedSave();
 }
 
 function loadRowsForProject(project) {
+  if (state.rowsByProject[project.id]) {
+    return state.rowsByProject[project.id].map((row) => ({ ...row }));
+  }
   const savedRows = localStorage.getItem(projectRowsKey(project.id));
   if (savedRows) {
     try {
@@ -749,6 +861,13 @@ function seedAdminLists() {
 }
 
 function loadAdminLists() {
+  if (state.adminListsLoadedFromCloud) {
+    state.adminLists = {
+      suppliers: uniqueSorted(state.adminLists.suppliers || []),
+      statuses: uniqueSorted(state.adminLists.statuses || []),
+    };
+    return;
+  }
   seedAdminLists();
   try {
     const saved = JSON.parse(localStorage.getItem(ADMIN_PREF_KEY) || "{}");
@@ -761,6 +880,7 @@ function loadAdminLists() {
 
 function saveAdminLists() {
   localStorage.setItem(ADMIN_PREF_KEY, JSON.stringify(state.adminLists));
+  queueSharedSave();
 }
 
 function addAdminValue(listName, value, rerender = true) {
@@ -1485,6 +1605,8 @@ async function init() {
   state.data = await fetch(DATA_URL).then((response) => response.json());
   state.baseRows = state.data.sheets[0].rows.map((row) => ({ ...row }));
   loadProjects();
+  initializeSupabase();
+  await loadSharedState();
   state.activeProjectId = localStorage.getItem(ACTIVE_PROJECT_PREF_KEY) || state.projects[0].id;
   if (!state.projects.some((project) => project.id === state.activeProjectId)) {
     state.activeProjectId = state.projects[0].id;
