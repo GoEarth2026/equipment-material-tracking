@@ -366,11 +366,25 @@ select {
   gap: 10px;
 }
 
-.project-metrics div {
+.project-metrics div,
+.metric-button {
   border: 1px solid #e2e7e4;
   border-radius: 8px;
   padding: 12px;
   background: #fbfcfb;
+  color: var(--ink);
+  text-align: left;
+}
+
+.metric-button {
+  cursor: pointer;
+}
+
+.metric-button:hover,
+.metric-button:focus {
+  border-color: #9bbcb0;
+  background: #f0f6f3;
+  outline: none;
 }
 
 .project-metrics span {

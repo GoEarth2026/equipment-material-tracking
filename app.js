@@ -495,7 +495,9 @@ function addMonths(date, months) {
 function requiredDateRangeOptions() {
   return [
     ["", "All required dates"],
+    ["overdue", "Items overdue"],
     ["next-30", "Required onsite within next 30 days"],
+    ["next-6-months", "Required onsite within next 6 months"],
     ["30-90", "Required onsite from 30 to 90 days"],
     ["90-6-months", "Required onsite 90 days to 6 months"],
     ["6-months-plus", "Required onsite 6 months or later"],
@@ -511,10 +513,13 @@ function matchesRequiredDateRange(row, range) {
   const todaySerial = todayExcelSerial();
   const sixMonthsSerial = excelSerialFromDate(addMonths(today, 6).toISOString().slice(0, 10));
   const daysOut = required - todaySerial;
+  const delivered = Boolean(row[FIELD.delivered]);
 
-  if (range === "next-30") return daysOut >= 0 && daysOut <= 30;
+  if (range === "overdue") return daysOut < 0 && !delivered;
+  if (range === "next-30") return daysOut >= 0 && daysOut <= 30 && !delivered;
   if (range === "30-90") return daysOut > 30 && daysOut <= 90;
   if (range === "90-6-months") return daysOut > 90 && required < sixMonthsSerial;
+  if (range === "next-6-months") return daysOut >= 0 && required <= sixMonthsSerial && !delivered;
   if (range === "6-months-plus") return required >= sixMonthsSerial;
   return true;
 }
@@ -1174,6 +1179,21 @@ function projectMetrics(rows) {
   });
 }
 
+function openProjectLogWithRequiredDateFilter(projectId, range) {
+  loadProject(projectId);
+  els.search.value = "";
+  els.status.value = "all";
+  els.area.value = "all";
+  els.provider.value = "all";
+  els.timing.value = "all";
+  state.logColumnFilters = range ? { [FIELD.required]: range } : {};
+  state.logSort = { column: FIELD.required, direction: "asc" };
+  saveLogControls();
+  state.filtered = state.rows.filter(matchesFilters);
+  renderLog();
+  setView("log");
+}
+
 function renderDashboard() {
   els.projectDashboard.innerHTML = state.projects.map((project) => {
     const rows = loadRowsForProject(project);
@@ -1189,9 +1209,9 @@ function renderDashboard() {
         </div>
         <div class="project-metrics">
           <div><span>Total Items</span><strong>${metrics.total}</strong></div>
-          <div><span>Items Overdue</span><strong>${metrics.overdue}</strong></div>
-          <div><span>Items Due Within 30-days</span><strong>${metrics.due30}</strong></div>
-          <div><span>Items Due Within 6-Months</span><strong>${metrics.due6Months}</strong></div>
+          <button class="metric-button" type="button" data-project-filter="${escapeHtml(project.id)}" data-required-range="overdue"><span>Items Overdue</span><strong>${metrics.overdue}</strong></button>
+          <button class="metric-button" type="button" data-project-filter="${escapeHtml(project.id)}" data-required-range="next-30"><span>Items Due Within 30-Days</span><strong>${metrics.due30}</strong></button>
+          <button class="metric-button" type="button" data-project-filter="${escapeHtml(project.id)}" data-required-range="next-6-months"><span>Items Due Within 6-Months</span><strong>${metrics.due6Months}</strong></button>
         </div>
       </article>
     `;
@@ -1201,6 +1221,12 @@ function renderDashboard() {
     button.addEventListener("click", () => {
       loadProject(button.dataset.openProject);
       setView("log");
+    });
+  });
+
+  document.querySelectorAll("[data-project-filter]").forEach((button) => {
+    button.addEventListener("click", () => {
+      openProjectLogWithRequiredDateFilter(button.dataset.projectFilter, button.dataset.requiredRange);
     });
   });
 }
