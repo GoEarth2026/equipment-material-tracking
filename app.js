@@ -228,6 +228,36 @@ async function loadSharedState() {
   }
 }
 
+async function maybeMigrateLocalStorageToSupabase() {
+  const params = new URLSearchParams(location.search);
+  if (params.get("migrateLocalToSupabase") !== "1") return false;
+  if (!state.supabaseClient) {
+    setSyncStatus("Migration failed - Supabase not configured", "local");
+    return false;
+  }
+
+  try {
+    setSyncStatus("Migrating local data to shared database...", "pending");
+    const localState = collectLocalStorageSharedState();
+    const { error } = await state.supabaseClient
+      .from("equipment_material_app_state")
+      .upsert({ id: "main", data: localState });
+    if (error) throw error;
+    state.projects = localState.projects;
+    state.rowsByProject = localState.rowsByProject;
+    state.adminLists = localState.adminLists;
+    state.adminListsLoadedFromCloud = true;
+    state.cloudReady = true;
+    setSyncStatus("Local data migrated to shared database", "cloud");
+    history.replaceState(null, "", `${location.pathname}${location.hash || "#dashboard"}`);
+    return true;
+  } catch (error) {
+    console.error(error);
+    setSyncStatus("Migration failed - see console", "local");
+    return false;
+  }
+}
+
 function queueSharedSave() {
   if (!state.supabaseClient || !state.cloudReady) return;
   clearTimeout(state.cloudSaveTimer);
@@ -266,6 +296,70 @@ function loadProjects() {
     state.projects.unshift(defaultProjects()[0]);
   }
   saveProjects();
+}
+
+function safeJsonParse(value, fallback) {
+  try {
+    return value ? JSON.parse(value) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function legacyBaselineRowsFromStorage() {
+  let rows = state.baseRows.map((row) => ({ ...row }));
+  const added = safeJsonParse(localStorage.getItem(ADDED_ITEMS_PREF_KEY), []);
+  if (Array.isArray(added) && added.length) rows = [...added, ...rows];
+
+  const edits = safeJsonParse(localStorage.getItem(EDIT_PREF_KEY), {});
+  rows.forEach((row) => {
+    const rowEdits = edits[rowKey(row)];
+    if (rowEdits) Object.assign(row, rowEdits);
+  });
+
+  const deleted = new Set(safeJsonParse(localStorage.getItem(DELETED_ITEMS_PREF_KEY), []));
+  rows = rows.filter((row) => !deleted.has(rowKey(row)));
+
+  const order = safeJsonParse(localStorage.getItem(ROW_ORDER_PREF_KEY), []);
+  if (Array.isArray(order) && order.length) {
+    const rowMap = new Map(rows.map((row) => [rowKey(row), row]));
+    const orderedRows = order.map((key) => rowMap.get(key)).filter(Boolean);
+    const orderedKeys = new Set(orderedRows.map(rowKey));
+    rows = [...orderedRows, ...rows.filter((row) => !orderedKeys.has(rowKey(row)))];
+  }
+
+  return rows;
+}
+
+function collectLocalStorageSharedState() {
+  const projects = safeJsonParse(localStorage.getItem(PROJECTS_PREF_KEY), defaultProjects());
+  const normalizedProjects = Array.isArray(projects) && projects.length ? projects : defaultProjects();
+  if (!normalizedProjects.some((project) => project.id === "hampton-wwtp-phase-ii")) {
+    normalizedProjects.unshift(defaultProjects()[0]);
+  }
+
+  const rowsByProject = {};
+  normalizedProjects.forEach((project) => {
+    rowsByProject[project.id] = projectRowsFromStorage(project.id)
+      || (project.baseline ? legacyBaselineRowsFromStorage() : []);
+  });
+
+  let adminLists = safeJsonParse(localStorage.getItem(ADMIN_PREF_KEY), null);
+  if (!adminLists) {
+    const allRows = Object.values(rowsByProject).flat();
+    adminLists = {
+      suppliers: uniqueSorted(allRows.map((row) => row[FIELD.provider])),
+      statuses: uniqueSorted(allRows.map((row) => row[FIELD.status])),
+    };
+  }
+
+  return {
+    projects: normalizedProjects,
+    rowsByProject,
+    adminLists,
+    updatedAt: new Date().toISOString(),
+    migratedFromLocalStorage: true,
+  };
 }
 
 function activeProject() {
@@ -1606,6 +1700,7 @@ async function init() {
   state.baseRows = state.data.sheets[0].rows.map((row) => ({ ...row }));
   loadProjects();
   initializeSupabase();
+  const didMigrate = await maybeMigrateLocalStorageToSupabase();
   await loadSharedState();
   state.activeProjectId = localStorage.getItem(ACTIVE_PROJECT_PREF_KEY) || state.projects[0].id;
   if (!state.projects.some((project) => project.id === state.activeProjectId)) {
