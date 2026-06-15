@@ -1,0 +1,1607 @@
+const DATA_URL = "./workbook-data.json";
+
+const FIELD = {
+  tag: "TAG #",
+  item: "ITEM DESCRIPTION",
+  spec: "SPECIFICATION SECTION",
+  provider: "PROVIDED BY:",
+  area: "AREA / BUILDING",
+  room: "ROOM / SYSTEM",
+  status: "SUBMITTAL STATUS",
+  released: "DATE RELEASED",
+  lead: "LEAD TIME (DAYS)",
+  delivery: "EXPECTED DELIVERY",
+  required: "DATE REQUIRED ONSITE",
+  delivered: "Delivered",
+  stored: "Stored Location",
+  remaining: "DAYS REMAININIG",
+  notes: "NOTES",
+};
+
+const state = {
+  data: null,
+  rows: [],
+  baseRows: [],
+  filtered: [],
+  projects: [],
+  activeProjectId: "hampton-wwtp-phase-ii",
+  activeView: "dashboard",
+  hiddenColumns: new Set(),
+  logColumnFilters: {},
+  logSort: { column: null, direction: "asc" },
+  deletedRowKeys: new Set(),
+  adminLists: {
+    suppliers: [],
+    statuses: [],
+  },
+  userInitials: "",
+};
+
+const VALID_VIEWS = new Set(["dashboard", "log", "procurement", "admin"]);
+const AUTOCOMPLETE_FILTERS = new Set([FIELD.provider, FIELD.area, FIELD.room, FIELD.status]);
+const COLUMN_PREF_KEY = "equipmentMaterialHiddenColumns";
+const LOG_FILTER_PREF_KEY = "equipmentMaterialLogColumnFilters";
+const LOG_SORT_PREF_KEY = "equipmentMaterialLogSort";
+const EDIT_PREF_KEY = "equipmentMaterialLogEdits";
+const ADMIN_PREF_KEY = "equipmentMaterialAdminLists";
+const INITIALS_PREF_KEY = "equipmentMaterialUserInitials";
+const ADDED_ITEMS_PREF_KEY = "equipmentMaterialAddedItems";
+const DELETED_ITEMS_PREF_KEY = "equipmentMaterialDeletedItems";
+const ROW_ORDER_PREF_KEY = "equipmentMaterialRowOrder";
+const PROJECTS_PREF_KEY = "equipmentMaterialProjects";
+const ACTIVE_PROJECT_PREF_KEY = "equipmentMaterialActiveProject";
+const PROJECT_ROWS_PREFIX = "equipmentMaterialProjectRows:";
+
+const els = {
+  viewTitle: document.querySelector("#view-title"),
+  projectSelect: document.querySelector("#projectSelect"),
+  search: document.querySelector("#searchInput"),
+  status: document.querySelector("#statusFilter"),
+  area: document.querySelector("#areaFilter"),
+  provider: document.querySelector("#providerFilter"),
+  timing: document.querySelector("#timingFilter"),
+  reset: document.querySelector("#resetFilters"),
+  addItem: document.querySelector("#addItemButton"),
+  exportExcel: document.querySelector("#exportExcelButton"),
+  columnToggle: document.querySelector("#columnToggle"),
+  columnMenu: document.querySelector("#columnMenu"),
+  projectDashboard: document.querySelector("#projectDashboard"),
+  kpiGrid: document.querySelector("#kpiGrid"),
+  attentionCount: document.querySelector("#attentionCount"),
+  attentionList: document.querySelector("#attentionList"),
+  statusBars: document.querySelector("#statusBars"),
+  providerBars: document.querySelector("#providerBars"),
+  upcomingList: document.querySelector("#upcomingList"),
+  logHead: document.querySelector("#logHead"),
+  logBody: document.querySelector("#logBody"),
+  procurementBoard: document.querySelector("#procurementBoard"),
+  projectForm: document.querySelector("#projectForm"),
+  projectInput: document.querySelector("#projectInput"),
+  projectList: document.querySelector("#projectList"),
+  projectCount: document.querySelector("#projectCount"),
+  supplierForm: document.querySelector("#supplierForm"),
+  supplierInput: document.querySelector("#supplierInput"),
+  supplierList: document.querySelector("#supplierList"),
+  supplierCount: document.querySelector("#supplierCount"),
+  userInitialsInput: document.querySelector("#userInitialsInput"),
+  statusAdminForm: document.querySelector("#statusAdminForm"),
+  statusAdminInput: document.querySelector("#statusAdminInput"),
+  statusAdminList: document.querySelector("#statusAdminList"),
+  statusAdminCount: document.querySelector("#statusAdminCount"),
+  downloadTemplate: document.querySelector("#downloadTemplateButton"),
+  importMode: document.querySelector("#importMode"),
+  importFile: document.querySelector("#importFileInput"),
+  importLog: document.querySelector("#importLogButton"),
+  importStatus: document.querySelector("#importStatus"),
+};
+
+function clean(value) {
+  return value === null || value === undefined ? "" : String(value).trim();
+}
+
+function normalizeKey(value) {
+  return clean(value).replace(/\s+/g, " ").toUpperCase();
+}
+
+function excelDate(value) {
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value === "string" && Number.isNaN(Number(value))) return value;
+  const serial = Number(value);
+  if (!Number.isFinite(serial) || serial <= 0) return clean(value);
+  const utcDays = Math.floor(serial - 25569);
+  const date = new Date(utcDays * 86400 * 1000);
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+function numeric(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function rowKey(row) {
+  return String(row._rowNumber || row[FIELD.tag] || state.rows.indexOf(row));
+}
+
+function isAddedRow(row) {
+  return rowKey(row).startsWith("new-");
+}
+
+function projectRowsKey(projectId = state.activeProjectId) {
+  return `${PROJECT_ROWS_PREFIX}${projectId}`;
+}
+
+function defaultProjects() {
+  return [{
+    id: "hampton-wwtp-phase-ii",
+    name: "Hampton WWTP Upgrade Phase II",
+    archived: false,
+    baseline: true,
+  }];
+}
+
+function saveProjects() {
+  localStorage.setItem(PROJECTS_PREF_KEY, JSON.stringify(state.projects));
+}
+
+function loadProjects() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PROJECTS_PREF_KEY) || "[]");
+    state.projects = saved.length ? saved : defaultProjects();
+  } catch {
+    state.projects = defaultProjects();
+  }
+  if (!state.projects.some((project) => project.id === "hampton-wwtp-phase-ii")) {
+    state.projects.unshift(defaultProjects()[0]);
+  }
+  saveProjects();
+}
+
+function activeProject() {
+  return state.projects.find((project) => project.id === state.activeProjectId) || state.projects[0];
+}
+
+function saveCurrentProjectRows() {
+  localStorage.setItem(projectRowsKey(), JSON.stringify(state.rows));
+}
+
+function loadRowsForProject(project) {
+  const savedRows = localStorage.getItem(projectRowsKey(project.id));
+  if (savedRows) {
+    try {
+      return JSON.parse(savedRows);
+    } catch {
+      localStorage.removeItem(projectRowsKey(project.id));
+    }
+  }
+  return project.baseline ? state.baseRows.map((row) => ({ ...row })) : [];
+}
+
+function resetLogControlsForProject() {
+  els.search.value = "";
+  els.status.value = "all";
+  els.area.value = "all";
+  els.provider.value = "all";
+  els.timing.value = "all";
+  state.logColumnFilters = {};
+  state.logSort = { column: null, direction: "asc" };
+  saveLogControls();
+}
+
+function loadProject(projectId) {
+  const nextProject = state.projects.find((project) => project.id === projectId) || state.projects[0];
+  if (!nextProject) return;
+  saveCurrentProjectRows();
+  state.activeProjectId = nextProject.id;
+  localStorage.setItem(ACTIVE_PROJECT_PREF_KEY, state.activeProjectId);
+  state.rows = loadRowsForProject(nextProject);
+  state.filtered = state.rows.filter(matchesFilters);
+  loadAdminLists();
+  resetLogControlsForProject();
+  populateGlobalFilters();
+  populateProjectSelect();
+  renderColumnMenu();
+  render();
+}
+
+function slugProjectName(name) {
+  const base = clean(name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "project";
+  let id = base;
+  let index = 2;
+  while (state.projects.some((project) => project.id === id)) {
+    id = `${base}-${index}`;
+    index += 1;
+  }
+  return id;
+}
+
+function addProject(name) {
+  const projectName = clean(name);
+  if (!projectName) return;
+  saveCurrentProjectRows();
+  const project = {
+    id: slugProjectName(projectName),
+    name: projectName,
+    archived: false,
+    baseline: false,
+  };
+  state.projects.push(project);
+  saveProjects();
+  localStorage.setItem(projectRowsKey(project.id), JSON.stringify([]));
+  loadProject(project.id);
+}
+
+function archiveProject(projectId) {
+  const project = state.projects.find((item) => item.id === projectId);
+  if (!project || project.archived) return;
+  if (!confirm(`Archive ${project.name}?`)) return;
+  project.archived = true;
+  saveProjects();
+  if (projectId === state.activeProjectId) {
+    const nextProject = state.projects.find((item) => !item.archived) || project;
+    loadProject(nextProject.id);
+  } else {
+    renderAdmin();
+    populateProjectSelect();
+  }
+}
+
+function restoreProject(projectId) {
+  const project = state.projects.find((item) => item.id === projectId);
+  if (!project) return;
+  project.archived = false;
+  saveProjects();
+  renderAdmin();
+  populateProjectSelect();
+}
+
+function excelSerialFromDate(value) {
+  const text = clean(value);
+  if (!text) return "";
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return value;
+  const utc = Date.UTC(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+  return Math.round(utc / 86400000 + 25569);
+}
+
+function todayExcelSerial() {
+  const now = new Date();
+  const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round(todayUtc / 86400000 + 25569);
+}
+
+function addMonths(date, months) {
+  const next = new Date(date);
+  next.setMonth(next.getMonth() + months);
+  return next;
+}
+
+function requiredDateRangeOptions() {
+  return [
+    ["", "All required dates"],
+    ["next-30", "Required onsite within next 30 days"],
+    ["30-90", "Required onsite from 30 to 90 days"],
+    ["90-6-months", "Required onsite 90 days to 6 months"],
+    ["6-months-plus", "Required onsite 6 months or later"],
+  ];
+}
+
+function matchesRequiredDateRange(row, range) {
+  if (!range) return true;
+  const required = numeric(row[FIELD.required]);
+  if (required === null) return false;
+
+  const today = new Date();
+  const todaySerial = todayExcelSerial();
+  const sixMonthsSerial = excelSerialFromDate(addMonths(today, 6).toISOString().slice(0, 10));
+  const daysOut = required - todaySerial;
+
+  if (range === "next-30") return daysOut >= 0 && daysOut <= 30;
+  if (range === "30-90") return daysOut > 30 && daysOut <= 90;
+  if (range === "90-6-months") return daysOut > 90 && required < sixMonthsSerial;
+  if (range === "6-months-plus") return required >= sixMonthsSerial;
+  return true;
+}
+
+function editableValue(row, header) {
+  return displayValue(row, header) || "";
+}
+
+function normalizeEditedValue(header, value) {
+  const text = clean(value);
+  if (!text) return null;
+  if ([FIELD.released, FIELD.delivery, FIELD.required].includes(header)) {
+    return excelSerialFromDate(text);
+  }
+  if ([FIELD.lead, FIELD.remaining].includes(header)) {
+    const valueNumber = Number(text);
+    return Number.isFinite(valueNumber) ? valueNumber : text;
+  }
+  if (header === FIELD.delivered) return Boolean(value);
+  return text;
+}
+
+function loadSavedEdits() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(EDIT_PREF_KEY) || "{}");
+    state.rows.forEach((row) => {
+      const edits = saved[rowKey(row)];
+      if (!edits) return;
+      Object.entries(edits).forEach(([header, value]) => {
+        row[header] = value;
+      });
+    });
+  } catch {
+    localStorage.removeItem(EDIT_PREF_KEY);
+  }
+}
+
+function saveCellEdit(row, header, value) {
+  let saved = {};
+  try {
+    saved = JSON.parse(localStorage.getItem(EDIT_PREF_KEY) || "{}");
+  } catch {
+    saved = {};
+  }
+
+  const key = rowKey(row);
+  saved[key] = { ...(saved[key] || {}), [header]: value };
+  row[header] = value;
+  localStorage.setItem(EDIT_PREF_KEY, JSON.stringify(saved));
+  if (header === FIELD.provider) addAdminValue("suppliers", value, false);
+  if (isAddedRow(row)) saveAddedItems();
+  saveCurrentProjectRows();
+}
+
+function populateProjectSelect() {
+  const activeProjects = state.projects.filter((project) => !project.archived || project.id === state.activeProjectId);
+  els.projectSelect.innerHTML = activeProjects.map((project) => (
+    `<option value="${escapeHtml(project.id)}" ${project.id === state.activeProjectId ? "selected" : ""}>${escapeHtml(project.name)}${project.archived ? " (Archived)" : ""}</option>`
+  )).join("");
+}
+
+function saveAddedItems() {
+  localStorage.setItem(ADDED_ITEMS_PREF_KEY, JSON.stringify(state.rows.filter(isAddedRow)));
+  saveCurrentProjectRows();
+}
+
+function saveRowOrder() {
+  localStorage.setItem(ROW_ORDER_PREF_KEY, JSON.stringify(state.rows.map(rowKey)));
+}
+
+function loadAddedItems() {
+  try {
+    const added = JSON.parse(localStorage.getItem(ADDED_ITEMS_PREF_KEY) || "[]");
+    state.rows = [...added, ...state.rows];
+  } catch {
+    localStorage.removeItem(ADDED_ITEMS_PREF_KEY);
+  }
+}
+
+function applySavedRowOrder() {
+  try {
+    const order = JSON.parse(localStorage.getItem(ROW_ORDER_PREF_KEY) || "[]");
+    if (!order.length) return;
+    const rowMap = new Map(state.rows.map((row) => [rowKey(row), row]));
+    const orderedRows = order.map((key) => rowMap.get(key)).filter(Boolean);
+    const orderedKeys = new Set(orderedRows.map(rowKey));
+    const remainingRows = state.rows.filter((row) => !orderedKeys.has(rowKey(row)));
+    state.rows = [...orderedRows, ...remainingRows];
+  } catch {
+    localStorage.removeItem(ROW_ORDER_PREF_KEY);
+  }
+}
+
+function loadDeletedItems() {
+  try {
+    state.deletedRowKeys = new Set(JSON.parse(localStorage.getItem(DELETED_ITEMS_PREF_KEY) || "[]"));
+    state.rows = state.rows.filter((row) => !state.deletedRowKeys.has(rowKey(row)));
+  } catch {
+    state.deletedRowKeys = new Set();
+    localStorage.removeItem(DELETED_ITEMS_PREF_KEY);
+  }
+}
+
+function saveDeletedItems() {
+  localStorage.setItem(DELETED_ITEMS_PREF_KEY, JSON.stringify([...state.deletedRowKeys]));
+  saveCurrentProjectRows();
+}
+
+function addItem() {
+  const row = { _rowNumber: `new-${Date.now()}` };
+  allTableHeaders().forEach((header) => {
+    row[header] = header === FIELD.delivered ? false : null;
+  });
+  state.rows.unshift(row);
+  saveAddedItems();
+  saveRowOrder();
+  els.search.value = "";
+  els.status.value = "all";
+  els.area.value = "all";
+  els.provider.value = "all";
+  els.timing.value = "all";
+  state.logColumnFilters = {};
+  state.logSort = { column: null, direction: "asc" };
+  saveLogControls();
+  state.filtered = state.rows.filter(matchesFilters);
+  renderColumnMenu();
+  render();
+  setView("log");
+}
+
+function clearLogPlacementFilters() {
+  els.search.value = "";
+  els.status.value = "all";
+  els.area.value = "all";
+  els.provider.value = "all";
+  els.timing.value = "all";
+  state.logColumnFilters = {};
+  state.logSort = { column: null, direction: "asc" };
+  saveLogControls();
+}
+
+function createBlankItem() {
+  const row = { _rowNumber: `new-${Date.now()}-${Math.floor(Math.random() * 1000)}` };
+  allTableHeaders().forEach((header) => {
+    row[header] = header === FIELD.delivered ? false : null;
+  });
+  return row;
+}
+
+function insertItemNearRow(targetRowKey, position) {
+  const targetIndex = state.rows.findIndex((row) => rowKey(row) === targetRowKey);
+  const row = createBlankItem();
+  const insertIndex = targetIndex === -1
+    ? 0
+    : targetIndex + (position === "below" ? 1 : 0);
+  state.rows.splice(insertIndex, 0, row);
+  saveAddedItems();
+  saveRowOrder();
+  clearLogPlacementFilters();
+  state.filtered = state.rows.filter(matchesFilters);
+  renderColumnMenu();
+  render();
+  setView("log");
+}
+
+function removeItem(rowKeyValue) {
+  const row = state.rows.find((candidate) => rowKey(candidate) === rowKeyValue);
+  const label = clean(row?.[FIELD.tag]) || clean(row?.[FIELD.item]) || "this item";
+  if (!confirm(`Remove ${label} from the log?`)) return;
+  state.deletedRowKeys.add(rowKeyValue);
+  state.rows = state.rows.filter((candidate) => rowKey(candidate) !== rowKeyValue);
+  saveDeletedItems();
+  saveAddedItems();
+  saveRowOrder();
+  state.filtered = state.rows.filter(matchesFilters);
+  renderColumnMenu();
+  render();
+}
+
+function formatNoteTimestamp(date = new Date()) {
+  return date.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function parseNotes(value) {
+  const text = clean(value);
+  if (!text) return [];
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) return parsed.filter((note) => note && clean(note.text));
+  } catch {
+    return [{ timestamp: "", initials: "Source", text }];
+  }
+  return [{ timestamp: "", initials: "Source", text }];
+}
+
+function serializeNotes(notes) {
+  return JSON.stringify(notes);
+}
+
+function notesForExport(value) {
+  return parseNotes(value).map((note) => {
+    const meta = [note.timestamp, note.initials].filter(Boolean).join(" - ");
+    return meta ? `${meta}: ${note.text}` : note.text;
+  }).join("\n");
+}
+
+function xmlEscape(value) {
+  return clean(value).replace(/[<>&'"]/g, (char) => ({
+    "<": "&lt;",
+    ">": "&gt;",
+    "&": "&amp;",
+    "'": "&apos;",
+    '"': "&quot;",
+  }[char]));
+}
+
+function exportValue(row, header) {
+  if (header === FIELD.delivered) return row[FIELD.delivered] ? "Yes" : "No";
+  if (header === FIELD.notes) return notesForExport(row[FIELD.notes]);
+  if ([FIELD.released, FIELD.delivery, FIELD.required].includes(header)) return excelDate(row[header]) || "";
+  return row[header] ?? "";
+}
+
+function safeFileName(value) {
+  return clean(value).replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "material-log";
+}
+
+function buildExcelXml(title, worksheetRows) {
+  const xmlRows = worksheetRows.map((row) => `
+    <Row>
+      ${row.map((value) => `<Cell><Data ss:Type="String">${xmlEscape(value)}</Data></Cell>`).join("")}
+    </Row>
+  `).join("");
+
+  return `<?xml version="1.0"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+  xmlns:o="urn:schemas-microsoft-com:office:office"
+  xmlns:x="urn:schemas-microsoft-com:office:excel"
+  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+  <DocumentProperties xmlns="urn:schemas-microsoft-com:office:office">
+    <Title>${xmlEscape(title)}</Title>
+    <Created>${new Date().toISOString()}</Created>
+  </DocumentProperties>
+  <Styles>
+    <Style ss:ID="Default" ss:Name="Normal">
+      <Alignment ss:Vertical="Top" ss:WrapText="1"/>
+      <Font ss:FontName="Arial" ss:Size="10"/>
+    </Style>
+  </Styles>
+  <Worksheet ss:Name="Material Log">
+    <Table>
+      ${xmlRows}
+    </Table>
+  </Worksheet>
+</Workbook>`;
+}
+
+function downloadTextFile(contents, fileName, type) {
+  const blob = new Blob([contents], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function downloadImportTemplate() {
+  const worksheetRows = [
+    allTableHeaders(),
+    allTableHeaders().map(() => ""),
+  ];
+  const xml = buildExcelXml("Material Log Import Template", worksheetRows);
+  downloadTextFile(xml, "material-log-import-template.xls", "application/vnd.ms-excel;charset=utf-8");
+}
+
+function exportMaterialLog() {
+  const project = activeProject();
+  const headers = allTableHeaders();
+  const rows = state.rows;
+  const worksheetRows = [
+    headers,
+    ...rows.map((row) => headers.map((header) => exportValue(row, header))),
+  ];
+  const xml = buildExcelXml(project?.name || "Material Log", worksheetRows);
+  const dateStamp = new Date().toISOString().slice(0, 10);
+  downloadTextFile(xml, `${safeFileName(project?.name)}-material-log-${dateStamp}.xls`, "application/vnd.ms-excel;charset=utf-8");
+}
+
+function parseDelimited(text, delimiter) {
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+    if (char === '"' && inQuotes && next === '"') {
+      cell += '"';
+      index += 1;
+    } else if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === delimiter && !inQuotes) {
+      row.push(cell);
+      cell = "";
+    } else if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && next === "\n") index += 1;
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = "";
+    } else {
+      cell += char;
+    }
+  }
+
+  row.push(cell);
+  rows.push(row);
+  return rows.filter((line) => line.some((value) => clean(value)));
+}
+
+function parseExcelXml(text) {
+  const doc = new DOMParser().parseFromString(text, "text/xml");
+  const rows = [...doc.getElementsByTagName("Row")];
+  return rows.map((row) => [...row.getElementsByTagName("Cell")].map((cell) => {
+    const data = cell.getElementsByTagName("Data")[0];
+    return data?.textContent || "";
+  })).filter((line) => line.some((value) => clean(value)));
+}
+
+function importedValue(header, value) {
+  const text = clean(value);
+  if (!text) return header === FIELD.delivered ? false : null;
+  if (header === FIELD.delivered) return ["YES", "TRUE", "Y", "1", "DELIVERED"].includes(normalizeKey(text));
+  if (header === FIELD.notes) {
+    return serializeNotes([{ timestamp: formatNoteTimestamp(), initials: "Import", text }]);
+  }
+  return normalizeEditedValue(header, text);
+}
+
+function rowsFromImportGrid(grid) {
+  if (!grid.length) return [];
+  const expectedHeaders = allTableHeaders();
+  const headerRow = grid[0].map(clean);
+  const headerMap = new Map(headerRow.map((header, index) => [normalizeKey(header), index]));
+  const hasKnownHeaders = expectedHeaders.some((header) => headerMap.has(normalizeKey(header)));
+  const dataRows = hasKnownHeaders ? grid.slice(1) : grid;
+
+  return dataRows.map((line) => {
+    const row = { _rowNumber: `new-${Date.now()}-${Math.floor(Math.random() * 1000000)}` };
+    expectedHeaders.forEach((header, index) => {
+      const sourceIndex = hasKnownHeaders ? headerMap.get(normalizeKey(header)) : index;
+      row[header] = importedValue(header, sourceIndex === undefined ? "" : line[sourceIndex]);
+    });
+    return row;
+  }).filter((row) => expectedHeaders.some((header) => header !== FIELD.delivered && clean(row[header])));
+}
+
+async function importMaterialLog() {
+  const file = els.importFile.files?.[0];
+  if (!file) {
+    els.importStatus.textContent = "Choose a file first";
+    return;
+  }
+
+  const text = await file.text();
+  const extension = file.name.split(".").pop().toLowerCase();
+  const grid = extension === "xls" || extension === "xml"
+    ? parseExcelXml(text)
+    : parseDelimited(text, extension === "csv" ? "," : "\t");
+  const rows = rowsFromImportGrid(grid);
+
+  if (!rows.length) {
+    els.importStatus.textContent = "No rows found";
+    return;
+  }
+
+  if (els.importMode.value === "replace" && !confirm(`Replace the current project log with ${rows.length} imported item(s)?`)) {
+    return;
+  }
+
+  state.rows = els.importMode.value === "replace" ? rows : [...state.rows, ...rows];
+  state.filtered = state.rows.filter(matchesFilters);
+  saveCurrentProjectRows();
+  loadAdminLists();
+  populateGlobalFilters();
+  populateProjectSelect();
+  renderColumnMenu();
+  render();
+  setView("log");
+  els.importStatus.textContent = `${rows.length} item(s) imported`;
+  els.importFile.value = "";
+}
+
+function ensureUserInitials() {
+  if (clean(state.userInitials)) return clean(state.userInitials).toUpperCase();
+  const entered = prompt("Enter your initials for timeline notes:");
+  const initials = clean(entered).toUpperCase();
+  if (!initials) return "";
+  state.userInitials = initials;
+  localStorage.setItem(INITIALS_PREF_KEY, initials);
+  if (els.userInitialsInput) els.userInitialsInput.value = initials;
+  return initials;
+}
+
+function appendNote(row) {
+  const initials = ensureUserInitials();
+  if (!initials) return;
+  const text = prompt("Add note:");
+  if (!clean(text)) return;
+  const notes = parseNotes(row[FIELD.notes]);
+  notes.push({
+    timestamp: formatNoteTimestamp(),
+    initials,
+    text: clean(text),
+  });
+  saveCellEdit(row, FIELD.notes, serializeNotes(notes));
+  state.filtered = state.rows.filter(matchesFilters);
+  renderLog();
+  renderDashboard();
+  renderProcurement();
+}
+
+function uniqueSorted(values) {
+  return [...new Set(values.map(clean).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function seedAdminLists() {
+  state.adminLists = {
+    suppliers: uniqueSorted(state.rows.map((row) => row[FIELD.provider])),
+    statuses: uniqueSorted(state.rows.map((row) => row[FIELD.status])),
+  };
+}
+
+function loadAdminLists() {
+  seedAdminLists();
+  try {
+    const saved = JSON.parse(localStorage.getItem(ADMIN_PREF_KEY) || "{}");
+    state.adminLists.suppliers = uniqueSorted([...(state.adminLists.suppliers || []), ...(saved.suppliers || [])]);
+    state.adminLists.statuses = uniqueSorted([...(state.adminLists.statuses || []), ...(saved.statuses || [])]);
+  } catch {
+    localStorage.removeItem(ADMIN_PREF_KEY);
+  }
+}
+
+function saveAdminLists() {
+  localStorage.setItem(ADMIN_PREF_KEY, JSON.stringify(state.adminLists));
+}
+
+function addAdminValue(listName, value, rerender = true) {
+  const text = clean(value);
+  if (!text) return;
+  state.adminLists[listName] = uniqueSorted([...(state.adminLists[listName] || []), text]);
+  saveAdminLists();
+  if (rerender) {
+    renderAdmin();
+    renderLog();
+    populateGlobalFilters();
+  }
+}
+
+function removeAdminValue(listName, value) {
+  const text = clean(value);
+  state.adminLists[listName] = (state.adminLists[listName] || []).filter((item) => item !== text);
+  saveAdminLists();
+  renderAdmin();
+  renderLog();
+  populateGlobalFilters();
+}
+
+function renameStatus(oldValue) {
+  const oldStatus = clean(oldValue);
+  if (!oldStatus) return;
+  const newStatus = clean(prompt("Rename submittal status:", oldStatus));
+  if (!newStatus || newStatus === oldStatus) return;
+
+  state.adminLists.statuses = uniqueSorted(
+    state.adminLists.statuses.map((status) => (status === oldStatus ? newStatus : status)),
+  );
+
+  state.rows.forEach((row) => {
+    if (clean(row[FIELD.status]) === oldStatus) {
+      saveCellEdit(row, FIELD.status, newStatus);
+    }
+  });
+
+  saveAdminLists();
+  state.filtered = state.rows.filter(matchesFilters);
+  renderAdmin();
+  renderLog();
+  renderDashboard();
+  renderProcurement();
+  populateGlobalFilters();
+}
+
+function statusClass(status) {
+  const key = normalizeKey(status);
+  if (key.includes("APPROVED") || key === "CLOSED" || key === "PURCHASED") return "ok";
+  if (key.includes("REQUEST") || key.includes("QUOTE") || key.includes("SUBMIT")) return "warn";
+  if (key.includes("RAN") || key.includes("RAR") || key.includes("NET")) return "danger";
+  return "";
+}
+
+function timing(row) {
+  const remaining = numeric(row[FIELD.remaining]);
+  if (remaining === null) return "No timing";
+  if (remaining <= 0) return "Late / due now";
+  if (remaining <= 30) return "Due within 30 days";
+  return `${remaining} days out`;
+}
+
+function attentionRank(row) {
+  const remaining = numeric(row[FIELD.remaining]);
+  const releaseMissing = !clean(row[FIELD.released]);
+  const deliveryMissing = !clean(row[FIELD.delivery]);
+  let score = 0;
+  if (remaining !== null && remaining <= 0) score += 4;
+  if (remaining !== null && remaining <= 30) score += 2;
+  if (releaseMissing) score += 2;
+  if (deliveryMissing) score += 2;
+  if (!clean(row[FIELD.status])) score += 1;
+  return score;
+}
+
+function countBy(rows, field) {
+  return rows.reduce((map, row) => {
+    const key = clean(row[field]) || "Blank";
+    map.set(key, (map.get(key) || 0) + 1);
+    return map;
+  }, new Map());
+}
+
+function sortedCounts(rows, field) {
+  return [...countBy(rows, field).entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
+function populateSelect(select, label, rows, field) {
+  const options = [...new Set(rows.map((row) => clean(row[field])).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+  select.innerHTML = [`<option value="all">All ${label}</option>`]
+    .concat(options.map((value) => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`))
+    .join("");
+}
+
+function populateGlobalFilters() {
+  const statusRows = uniqueSorted([...state.adminLists.statuses, ...state.rows.map((row) => row[FIELD.status])])
+    .map((status) => ({ [FIELD.status]: status }));
+  const providerRows = uniqueSorted([...state.adminLists.suppliers, ...state.rows.map((row) => row[FIELD.provider])])
+    .map((provider) => ({ [FIELD.provider]: provider }));
+  populateSelect(els.status, "statuses", statusRows, FIELD.status);
+  populateSelect(els.area, "areas", state.rows, FIELD.area);
+  populateSelect(els.provider, "providers", providerRows, FIELD.provider);
+}
+
+function escapeHtml(value) {
+  return clean(value).replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;",
+  }[char]));
+}
+
+function matchesFilters(row) {
+  const term = normalizeKey(els.search.value);
+  const searchable = normalizeKey([
+    row[FIELD.tag],
+    row[FIELD.item],
+    row[FIELD.spec],
+    row[FIELD.provider],
+    row[FIELD.area],
+    row[FIELD.room],
+    row[FIELD.status],
+    row[FIELD.notes],
+  ].join(" "));
+
+  if (term && !searchable.includes(term)) return false;
+  if (els.status.value !== "all" && clean(row[FIELD.status]) !== els.status.value) return false;
+  if (els.area.value !== "all" && clean(row[FIELD.area]) !== els.area.value) return false;
+  if (els.provider.value !== "all" && clean(row[FIELD.provider]) !== els.provider.value) return false;
+
+  const remaining = numeric(row[FIELD.remaining]);
+  if (els.timing.value === "late" && !(remaining !== null && remaining <= 0)) return false;
+  if (els.timing.value === "30" && !(remaining !== null && remaining >= 0 && remaining <= 30)) return false;
+  if (els.timing.value === "missing-release" && clean(row[FIELD.released])) return false;
+  if (els.timing.value === "missing-delivery" && clean(row[FIELD.delivery])) return false;
+
+  return true;
+}
+
+function applyFilters() {
+  state.filtered = state.rows.filter(matchesFilters);
+  render();
+}
+
+function renderKpis(rows) {
+  const late = rows.filter((row) => numeric(row[FIELD.remaining]) !== null && numeric(row[FIELD.remaining]) <= 0).length;
+  const dueSoon = rows.filter((row) => {
+    const days = numeric(row[FIELD.remaining]);
+    return days !== null && days > 0 && days <= 30;
+  }).length;
+  const missingDelivery = rows.filter((row) => !clean(row[FIELD.delivery])).length;
+  const providers = new Set(rows.map((row) => clean(row[FIELD.provider])).filter(Boolean)).size;
+
+  const cards = [
+    ["Total Items", rows.length, "Rows from the imported log"],
+    ["Late / Due Now", late, "Based on days remaining"],
+    ["Due Within 30", dueSoon, "Upcoming required onsite dates"],
+    ["Providers", providers, `${missingDelivery} missing expected delivery`],
+  ];
+
+  els.kpiGrid.innerHTML = cards.map(([label, value, note]) => `
+    <article class="panel kpi">
+      <span>${label}</span>
+      <strong>${value}</strong>
+      <p>${note}</p>
+    </article>
+  `).join("");
+}
+
+function projectMetrics(rows) {
+  const today = todayExcelSerial();
+  const sixMonths = excelSerialFromDate(addMonths(new Date(), 6).toISOString().slice(0, 10));
+  return rows.reduce((metrics, row) => {
+    const required = numeric(row[FIELD.required]);
+    const delivered = Boolean(row[FIELD.delivered]);
+    metrics.total += 1;
+    if (required !== null && required < today && !delivered) metrics.overdue += 1;
+    if (required !== null && required >= today && required <= today + 30 && !delivered) metrics.due30 += 1;
+    if (required !== null && required >= today && required <= sixMonths && !delivered) metrics.due6Months += 1;
+    return metrics;
+  }, {
+    total: 0,
+    overdue: 0,
+    due30: 0,
+    due6Months: 0,
+  });
+}
+
+function renderDashboard() {
+  els.projectDashboard.innerHTML = state.projects.map((project) => {
+    const rows = loadRowsForProject(project);
+    const metrics = projectMetrics(rows);
+    return `
+      <article class="panel project-card ${project.archived ? "is-archived" : ""}">
+        <div class="project-card-header">
+          <div>
+            <h3>${escapeHtml(project.name)}</h3>
+            <span class="badge ${project.archived ? "warn" : "ok"}">${project.archived ? "Archived" : "Active"}</span>
+          </div>
+          <button class="ghost-button" type="button" data-open-project="${escapeHtml(project.id)}">${project.archived ? "View" : "Open"}</button>
+        </div>
+        <div class="project-metrics">
+          <div><span>Total Items</span><strong>${metrics.total}</strong></div>
+          <div><span>Items Overdue</span><strong>${metrics.overdue}</strong></div>
+          <div><span>Items Due Within 30-days</span><strong>${metrics.due30}</strong></div>
+          <div><span>Items Due Within 6-Months</span><strong>${metrics.due6Months}</strong></div>
+        </div>
+      </article>
+    `;
+  }).join("") || `<p class="empty">No projects have been added.</p>`;
+
+  document.querySelectorAll("[data-open-project]").forEach((button) => {
+    button.addEventListener("click", () => {
+      loadProject(button.dataset.openProject);
+      setView("log");
+    });
+  });
+}
+
+function renderList(target, rows, emptyText) {
+  if (!rows.length) {
+    target.innerHTML = `<p class="empty">${emptyText}</p>`;
+    return;
+  }
+
+  target.innerHTML = rows.map((row) => `
+    <article class="list-row">
+      <div class="title-line">
+        <span>${escapeHtml(row[FIELD.tag] || "No tag")} · ${escapeHtml(row[FIELD.item])}</span>
+        <span class="badge ${statusClass(row[FIELD.status])}">${escapeHtml(row[FIELD.status] || "No status")}</span>
+      </div>
+      <div class="meta">${escapeHtml(row[FIELD.area])} · ${escapeHtml(row[FIELD.provider])}</div>
+      <div class="meta">Required onsite: ${escapeHtml(excelDate(row[FIELD.required]) || "Not set")} · ${escapeHtml(timing(row))}</div>
+    </article>
+  `).join("");
+}
+
+function renderBars(target, rows, field, limit = 8) {
+  const counts = sortedCounts(rows, field).slice(0, limit);
+  const max = counts[0]?.[1] || 1;
+  target.innerHTML = counts.map(([label, value]) => `
+    <div class="bar-row">
+      <span>${escapeHtml(label)}</span>
+      <div class="bar-track"><div class="bar-fill" style="width: ${(value / max) * 100}%"></div></div>
+      <strong>${value}</strong>
+    </div>
+  `).join("") || `<p class="empty">No records match the current filters.</p>`;
+}
+
+function renderTable(head, body, rows, headers, raw = false) {
+  const visibleHeaders = headers.filter((header) => !state.hiddenColumns.has(header));
+  head.innerHTML = visibleHeaders.map((header) => `<th>${escapeHtml(header)}</th>`).join("");
+  body.innerHTML = rows.map((row) => `
+    <tr>
+      ${visibleHeaders.map((header) => {
+        const value = raw ? row[header] : row[header];
+        const isDate = [FIELD.released, FIELD.delivery, FIELD.required].includes(header);
+        const display = isDate ? excelDate(value) : value;
+        const dateConflict = numeric(row[FIELD.delivery]) !== null
+          && numeric(row[FIELD.required]) !== null
+          && numeric(row[FIELD.delivery]) > numeric(row[FIELD.required])
+          && [FIELD.delivery, FIELD.required].includes(header);
+        if (header === FIELD.status) {
+          return `<td><span class="badge ${statusClass(display)}">${escapeHtml(display)}</span></td>`;
+        }
+        return `<td class="${dateConflict ? "date-conflict" : ""}">${escapeHtml(display)}</td>`;
+      }).join("")}
+    </tr>
+  `).join("");
+}
+
+function displayValue(row, header) {
+  const value = row[header];
+  if (header === FIELD.delivered) return value ? "Delivered" : "";
+  return [FIELD.released, FIELD.delivery, FIELD.required].includes(header) ? excelDate(value) : value;
+}
+
+function sortValue(row, header) {
+  if (header === FIELD.delivered) return row[FIELD.delivered] ? 1 : 0;
+  if ([FIELD.released, FIELD.delivery, FIELD.required, FIELD.lead, FIELD.remaining].includes(header)) {
+    const value = numeric(row[header]);
+    return value === null ? Number.POSITIVE_INFINITY : value;
+  }
+  return normalizeKey(displayValue(row, header));
+}
+
+function dateConflict(row, header) {
+  return numeric(row[FIELD.delivery]) !== null
+    && numeric(row[FIELD.required]) !== null
+    && numeric(row[FIELD.delivery]) > numeric(row[FIELD.required])
+    && [FIELD.delivery, FIELD.required].includes(header);
+}
+
+function logHeaders() {
+  return [FIELD.tag, FIELD.item, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.delivered, FIELD.stored, FIELD.remaining, FIELD.notes];
+}
+
+function columnOptions(header) {
+  if (header === FIELD.provider) return state.adminLists.suppliers;
+  if (header === FIELD.status) return state.adminLists.statuses;
+  return [...new Set(state.rows.map((row) => clean(row[header])).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+}
+
+function listIdForColumn(header) {
+  return `list-${header.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase()}`;
+}
+
+function visibleLogHeaders() {
+  return logHeaders().filter((header) => !state.hiddenColumns.has(header));
+}
+
+function getLogRows() {
+  const activeFilters = Object.entries(state.logColumnFilters)
+    .filter(([, value]) => clean(value));
+
+  let rows = state.filtered.filter((row) => activeFilters.every(([header, value]) => {
+    if (header === FIELD.required) return matchesRequiredDateRange(row, value);
+    return normalizeKey(displayValue(row, header)).includes(normalizeKey(value));
+  }));
+
+  if (state.logSort.column) {
+    const { column, direction } = state.logSort;
+    rows = [...rows].sort((a, b) => {
+      const aValue = sortValue(a, column);
+      const bValue = sortValue(b, column);
+      const result = typeof aValue === "number" && typeof bValue === "number"
+        ? aValue - bValue
+        : String(aValue).localeCompare(String(bValue));
+      return direction === "asc" ? result : -result;
+    });
+  }
+
+  return rows;
+}
+
+function saveLogControls() {
+  localStorage.setItem(LOG_FILTER_PREF_KEY, JSON.stringify(state.logColumnFilters));
+  localStorage.setItem(LOG_SORT_PREF_KEY, JSON.stringify(state.logSort));
+}
+
+function renderLogHead() {
+  const headers = visibleLogHeaders();
+  els.logHead.innerHTML = `
+    <th>
+      <div class="th-control">
+        <span>Actions</span>
+      </div>
+    </th>
+    ${headers.map((header) => {
+    const isSorted = state.logSort.column === header;
+    const indicator = isSorted ? (state.logSort.direction === "asc" ? "ASC" : "DESC") : "";
+    const hasAutocomplete = AUTOCOMPLETE_FILTERS.has(header);
+    const datalistId = listIdForColumn(header);
+    const filterControl = header === FIELD.required
+      ? `
+        <select class="column-filter-input" data-filter-column="${escapeHtml(header)}">
+          ${requiredDateRangeOptions().map(([value, label]) => `<option value="${escapeHtml(value)}" ${state.logColumnFilters[header] === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
+        </select>
+      `
+      : `
+        <input class="column-filter-input" data-filter-column="${escapeHtml(header)}" ${hasAutocomplete ? `list="${escapeHtml(datalistId)}"` : ""} value="${escapeHtml(state.logColumnFilters[header] || "")}" placeholder="Filter" />
+        ${hasAutocomplete ? `
+          <datalist id="${escapeHtml(datalistId)}">
+            ${columnOptions(header).map((value) => `<option value="${escapeHtml(value)}"></option>`).join("")}
+          </datalist>
+        ` : ""}
+      `;
+    return `
+      <th>
+        <div class="th-control">
+          <button class="sort-button" type="button" data-sort-column="${escapeHtml(header)}">
+            <span>${escapeHtml(header)}</span>
+            <span class="sort-indicator">${indicator}</span>
+          </button>
+          ${filterControl}
+        </div>
+      </th>
+    `;
+  }).join("")}
+  `;
+
+  els.logHead.querySelectorAll("[data-sort-column]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const column = button.dataset.sortColumn;
+      if (state.logSort.column === column) {
+        state.logSort.direction = state.logSort.direction === "asc" ? "desc" : "asc";
+      } else {
+        state.logSort = { column, direction: "asc" };
+      }
+      saveLogControls();
+      renderLog();
+    });
+  });
+
+  els.logHead.querySelectorAll("[data-filter-column]").forEach((input) => {
+    input.addEventListener("input", () => {
+      state.logColumnFilters[input.dataset.filterColumn] = input.value;
+      saveLogControls();
+      renderLogBody();
+    });
+  });
+}
+
+function bindEditableCells() {
+  els.logBody.querySelectorAll("[data-edit-column]").forEach((cell) => {
+    cell.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        cell.blur();
+      }
+    });
+
+    cell.addEventListener("blur", () => {
+      const row = state.rows.find((candidate) => rowKey(candidate) === cell.dataset.editRow);
+      if (!row) return;
+      const header = cell.dataset.editColumn;
+      const value = normalizeEditedValue(header, cell.textContent);
+      saveCellEdit(row, header, value);
+      state.filtered = state.rows.filter(matchesFilters);
+      renderAdmin();
+      populateGlobalFilters();
+      renderColumnMenu();
+      renderLog();
+      renderDashboard();
+      renderProcurement();
+    });
+  });
+}
+
+function bindStatusSelects() {
+  els.logBody.querySelectorAll("[data-status-row]").forEach((select) => {
+    select.addEventListener("change", () => {
+      const row = state.rows.find((candidate) => rowKey(candidate) === select.dataset.statusRow);
+      if (!row) return;
+      saveCellEdit(row, FIELD.status, normalizeEditedValue(FIELD.status, select.value));
+      state.filtered = state.rows.filter(matchesFilters);
+      renderLog();
+      renderDashboard();
+      renderProcurement();
+      populateGlobalFilters();
+    });
+  });
+}
+
+function bindDeliveredCheckboxes() {
+  els.logBody.querySelectorAll("[data-delivered-row]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const row = state.rows.find((candidate) => rowKey(candidate) === checkbox.dataset.deliveredRow);
+      if (!row) return;
+      saveCellEdit(row, FIELD.delivered, checkbox.checked);
+      state.filtered = state.rows.filter(matchesFilters);
+      renderLog();
+      renderDashboard();
+      renderProcurement();
+    });
+  });
+}
+
+function bindNoteButtons() {
+  els.logBody.querySelectorAll("[data-add-note-row]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const row = state.rows.find((candidate) => rowKey(candidate) === button.dataset.addNoteRow);
+      if (row) appendNote(row);
+    });
+  });
+}
+
+function renderNotesCell(row) {
+  const notes = parseNotes(row[FIELD.notes]);
+  return `
+    <td class="notes-cell">
+      <div class="note-timeline">
+        ${notes.map((note) => `
+          <div class="note-entry">
+            <div class="note-meta">${escapeHtml([note.timestamp, note.initials].filter(Boolean).join(" · "))}</div>
+            <div class="note-text">${escapeHtml(note.text)}</div>
+          </div>
+        `).join("") || `<div class="meta">No notes yet.</div>`}
+        <button class="add-note-button" type="button" data-add-note-row="${escapeHtml(rowKey(row))}">Add Note</button>
+      </div>
+    </td>
+  `;
+}
+
+function renderLogBody() {
+  const headers = visibleLogHeaders();
+  const rows = getLogRows();
+  els.logBody.innerHTML = rows.map((row) => `
+    <tr>
+      <td class="action-cell">
+        <button class="icon-row-button remove-row-button" type="button" data-remove-row="${escapeHtml(rowKey(row))}" aria-label="Remove item" title="Remove item">×</button>
+        <button class="icon-row-button insert-row-button" type="button" data-insert-row="${escapeHtml(rowKey(row))}" data-insert-position="below" aria-label="Insert row below" title="Insert row below">+</button>
+      </td>
+      ${headers.map((header) => {
+        const display = displayValue(row, header);
+        if (header === FIELD.status) {
+          const current = clean(display);
+          const options = uniqueSorted([current, ...state.adminLists.statuses]);
+          return `
+            <td>
+              <select class="cell-select" data-status-row="${escapeHtml(rowKey(row))}">
+                <option value=""></option>
+                ${options.map((status) => `<option value="${escapeHtml(status)}" ${status === current ? "selected" : ""}>${escapeHtml(status)}</option>`).join("")}
+              </select>
+            </td>
+          `;
+        }
+        if (header === FIELD.delivered) {
+          return `
+            <td class="delivered-cell">
+              <input type="checkbox" data-delivered-row="${escapeHtml(rowKey(row))}" ${row[FIELD.delivered] ? "checked" : ""} aria-label="Delivered" />
+            </td>
+          `;
+        }
+        if (header === FIELD.notes) {
+          return renderNotesCell(row);
+        }
+        return `<td class="editable-cell ${dateConflict(row, header) ? "date-conflict" : ""}" contenteditable="true" data-edit-row="${escapeHtml(rowKey(row))}" data-edit-column="${escapeHtml(header)}">${escapeHtml(editableValue(row, header))}</td>`;
+      }).join("")}
+    </tr>
+  `).join("");
+  bindEditableCells();
+  bindStatusSelects();
+  bindDeliveredCheckboxes();
+  bindNoteButtons();
+  bindInsertButtons();
+  bindRemoveButtons();
+}
+
+function bindInsertButtons() {
+  els.logBody.querySelectorAll("[data-insert-row]").forEach((button) => {
+    button.addEventListener("click", () => {
+      insertItemNearRow(button.dataset.insertRow, button.dataset.insertPosition);
+    });
+  });
+}
+
+function bindRemoveButtons() {
+  els.logBody.querySelectorAll("[data-remove-row]").forEach((button) => {
+    button.addEventListener("click", () => removeItem(button.dataset.removeRow));
+  });
+}
+
+function allTableHeaders() {
+  return [FIELD.tag, FIELD.item, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.delivered, FIELD.stored, FIELD.remaining, FIELD.notes];
+}
+
+function saveColumnPrefs() {
+  localStorage.setItem(COLUMN_PREF_KEY, JSON.stringify([...state.hiddenColumns]));
+}
+
+function renderColumnMenu() {
+  const headers = allTableHeaders();
+  els.columnMenu.innerHTML = `
+    <header>
+      <span>Visible Columns</span>
+      <button id="showAllColumns" type="button">Show all</button>
+    </header>
+    ${headers.map((header) => `
+      <label class="column-option">
+        <input type="checkbox" value="${escapeHtml(header)}" ${state.hiddenColumns.has(header) ? "" : "checked"} />
+        <span>${escapeHtml(header)}</span>
+      </label>
+    `).join("")}
+  `;
+
+  els.columnMenu.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        state.hiddenColumns.delete(checkbox.value);
+      } else {
+        state.hiddenColumns.add(checkbox.value);
+      }
+      saveColumnPrefs();
+      render();
+    });
+  });
+
+  els.columnMenu.querySelector("#showAllColumns").addEventListener("click", () => {
+    state.hiddenColumns.clear();
+    saveColumnPrefs();
+    renderColumnMenu();
+    render();
+  });
+}
+
+function renderLog() {
+  renderLogHead();
+  renderLogBody();
+}
+
+function procurementBucket(row) {
+  const status = normalizeKey(row[FIELD.status]);
+  if (!clean(row[FIELD.released]) || status.includes("REQUEST") || status.includes("QUOTE") || status.includes("SUBMIT")) return "Pre-release";
+  if (!clean(row[FIELD.delivery]) || status.includes("RAN") || status.includes("RAR") || status.includes("NET")) return "Pending delivery";
+  if (numeric(row[FIELD.remaining]) !== null && numeric(row[FIELD.remaining]) <= 30) return "Due onsite";
+  return "Released / tracking";
+}
+
+function renderProcurement() {
+  const buckets = ["Pre-release", "Pending delivery", "Due onsite", "Released / tracking"];
+  els.procurementBoard.innerHTML = buckets.map((bucket) => {
+    const rows = state.filtered.filter((row) => procurementBucket(row) === bucket);
+    return `
+      <section class="board-column">
+        <header><span>${bucket}</span><span>${rows.length}</span></header>
+        <div class="cards">
+          ${rows.slice(0, 30).map((row) => `
+            <article class="list-row">
+              <div class="title-line">
+                <span>${escapeHtml(row[FIELD.tag] || "No tag")}</span>
+                <span class="badge ${statusClass(row[FIELD.status])}">${escapeHtml(row[FIELD.status] || "No status")}</span>
+              </div>
+              <strong>${escapeHtml(row[FIELD.item])}</strong>
+              <div class="meta">${escapeHtml(row[FIELD.provider])}</div>
+              <div class="meta">Delivery: ${escapeHtml(excelDate(row[FIELD.delivery]) || "Not set")}</div>
+            </article>
+          `).join("") || `<p class="empty">No matching records.</p>`}
+        </div>
+      </section>
+    `;
+  }).join("");
+}
+
+function renderAdminList(target, listName, values) {
+  target.innerHTML = values.map((value) => `
+    <div class="admin-row">
+      <span>${escapeHtml(value)}</span>
+      <div class="admin-row-actions">
+        ${listName === "statuses" ? `<button class="text-button neutral" type="button" data-rename-status="${escapeHtml(value)}">Rename</button>` : ""}
+        <button class="text-button" type="button" data-remove-list="${listName}" data-remove-value="${escapeHtml(value)}">Remove</button>
+      </div>
+    </div>
+  `).join("") || `<p class="empty">No values yet.</p>`;
+}
+
+function renderProjectList() {
+  els.projectCount.textContent = `${state.projects.length} projects`;
+  els.projectList.innerHTML = state.projects.map((project) => `
+    <div class="admin-row">
+      <span>${escapeHtml(project.name)}${project.archived ? " (Archived)" : ""}</span>
+      <div class="admin-row-actions">
+        ${project.archived
+          ? `<button class="text-button neutral" type="button" data-restore-project="${escapeHtml(project.id)}">Restore</button>`
+          : `<button class="text-button" type="button" data-archive-project="${escapeHtml(project.id)}">Archive</button>`}
+      </div>
+    </div>
+  `).join("");
+
+  document.querySelectorAll("[data-archive-project]").forEach((button) => {
+    button.addEventListener("click", () => archiveProject(button.dataset.archiveProject));
+  });
+
+  document.querySelectorAll("[data-restore-project]").forEach((button) => {
+    button.addEventListener("click", () => restoreProject(button.dataset.restoreProject));
+  });
+}
+
+function renderAdmin() {
+  renderProjectList();
+  els.userInitialsInput.value = state.userInitials;
+  els.supplierCount.textContent = `${state.adminLists.suppliers.length} values`;
+  els.statusAdminCount.textContent = `${state.adminLists.statuses.length} values`;
+  renderAdminList(els.supplierList, "suppliers", state.adminLists.suppliers);
+  renderAdminList(els.statusAdminList, "statuses", state.adminLists.statuses);
+
+  document.querySelectorAll("[data-remove-list]").forEach((button) => {
+    button.addEventListener("click", () => {
+      removeAdminValue(button.dataset.removeList, button.dataset.removeValue);
+    });
+  });
+
+  document.querySelectorAll("[data-rename-status]").forEach((button) => {
+    button.addEventListener("click", () => {
+      renameStatus(button.dataset.renameStatus);
+    });
+  });
+}
+
+function render() {
+  renderDashboard();
+  renderLog();
+  renderProcurement();
+  renderAdmin();
+}
+
+function setView(view) {
+  if (!VALID_VIEWS.has(view)) view = "dashboard";
+  state.activeView = view;
+  localStorage.setItem("equipmentMaterialActiveView", view);
+  if (location.hash !== `#${view}`) {
+    history.replaceState(null, "", `#${view}`);
+  }
+  document.querySelectorAll(".nav-tab").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.view === view);
+  });
+  document.querySelectorAll(".view").forEach((section) => {
+    section.classList.toggle("is-active", section.id === `${view}View`);
+  });
+  els.viewTitle.textContent = {
+    dashboard: "Dashboard",
+    log: "Material Log",
+    procurement: "Procurement",
+    admin: "Admin",
+  }[view];
+  const showColumnControls = view === "log";
+  document.querySelector(".column-controls").style.display = showColumnControls ? "flex" : "none";
+  document.querySelector(".filters").style.display = view === "admin" ? "none" : "grid";
+  if (!showColumnControls) {
+    els.columnMenu.hidden = true;
+    els.columnToggle.setAttribute("aria-expanded", "false");
+  }
+}
+
+async function init() {
+  state.data = await fetch(DATA_URL).then((response) => response.json());
+  state.baseRows = state.data.sheets[0].rows.map((row) => ({ ...row }));
+  loadProjects();
+  state.activeProjectId = localStorage.getItem(ACTIVE_PROJECT_PREF_KEY) || state.projects[0].id;
+  if (!state.projects.some((project) => project.id === state.activeProjectId)) {
+    state.activeProjectId = state.projects[0].id;
+  }
+  state.rows = loadRowsForProject(activeProject());
+  if (activeProject()?.baseline && !localStorage.getItem(projectRowsKey())) {
+    loadAddedItems();
+    loadSavedEdits();
+    loadDeletedItems();
+    applySavedRowOrder();
+    saveCurrentProjectRows();
+  }
+  loadAdminLists();
+  state.userInitials = clean(localStorage.getItem(INITIALS_PREF_KEY)).toUpperCase();
+  state.filtered = state.rows;
+  const initialView = location.hash.slice(1) || localStorage.getItem("equipmentMaterialActiveView") || "dashboard";
+  try {
+    const savedHiddenColumns = JSON.parse(localStorage.getItem(COLUMN_PREF_KEY) || "[]");
+    state.hiddenColumns = new Set(savedHiddenColumns.filter((header) => allTableHeaders().includes(header)));
+  } catch {
+    state.hiddenColumns = new Set();
+  }
+  try {
+    const savedColumnFilters = JSON.parse(localStorage.getItem(LOG_FILTER_PREF_KEY) || "{}");
+    state.logColumnFilters = Object.fromEntries(
+      Object.entries(savedColumnFilters).filter(([header]) => logHeaders().includes(header)),
+    );
+  } catch {
+    state.logColumnFilters = {};
+  }
+  try {
+    const savedSort = JSON.parse(localStorage.getItem(LOG_SORT_PREF_KEY) || "{}");
+    if (logHeaders().includes(savedSort.column) && ["asc", "desc"].includes(savedSort.direction)) {
+      state.logSort = savedSort;
+    }
+  } catch {
+    state.logSort = { column: null, direction: "asc" };
+  }
+
+  populateGlobalFilters();
+  populateProjectSelect();
+
+  [els.search, els.status, els.area, els.provider, els.timing].forEach((control) => {
+    control.addEventListener("input", applyFilters);
+    control.addEventListener("change", applyFilters);
+  });
+
+  els.reset.addEventListener("click", () => {
+    els.search.value = "";
+    els.status.value = "all";
+    els.area.value = "all";
+    els.provider.value = "all";
+    els.timing.value = "all";
+    state.logColumnFilters = {};
+    state.logSort = { column: null, direction: "asc" };
+    saveLogControls();
+    applyFilters();
+  });
+
+  els.columnToggle.addEventListener("click", () => {
+    els.columnMenu.hidden = !els.columnMenu.hidden;
+    els.columnToggle.setAttribute("aria-expanded", String(!els.columnMenu.hidden));
+  });
+
+  els.addItem.addEventListener("click", addItem);
+
+  els.exportExcel.addEventListener("click", exportMaterialLog);
+
+  els.downloadTemplate.addEventListener("click", downloadImportTemplate);
+
+  els.importLog.addEventListener("click", importMaterialLog);
+
+  els.projectSelect.addEventListener("change", () => {
+    saveCurrentProjectRows();
+    loadProject(els.projectSelect.value);
+  });
+
+  els.projectForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    addProject(els.projectInput.value);
+    els.projectInput.value = "";
+  });
+
+  els.supplierForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    addAdminValue("suppliers", els.supplierInput.value);
+    els.supplierInput.value = "";
+  });
+
+  els.statusAdminForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    addAdminValue("statuses", els.statusAdminInput.value);
+    els.statusAdminInput.value = "";
+  });
+
+  els.userInitialsInput.addEventListener("input", () => {
+    state.userInitials = clean(els.userInitialsInput.value).toUpperCase();
+    els.userInitialsInput.value = state.userInitials;
+    localStorage.setItem(INITIALS_PREF_KEY, state.userInitials);
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest(".column-controls")) {
+      els.columnMenu.hidden = true;
+      els.columnToggle.setAttribute("aria-expanded", "false");
+    }
+  });
+
+  document.querySelectorAll(".nav-tab").forEach((button) => {
+    button.addEventListener("click", () => setView(button.dataset.view));
+  });
+
+  renderColumnMenu();
+  render();
+  setView(initialView);
+}
+
+init().catch((error) => {
+  document.body.innerHTML = `<main class="main"><section class="panel" style="padding: 20px;"><h1>Unable to load app data</h1><p>${escapeHtml(error.message)}</p></section></main>`;
+});

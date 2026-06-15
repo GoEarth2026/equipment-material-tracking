@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Equipment &amp; Material Tracking</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="App navigation">
+        <div class="brand">
+          <div class="brand-mark">EM</div>
+          <div>
+            <h1>Equipment &amp; Material Tracking</h1>
+            <p>Hampton WWTP Upgrade Phase II</p>
+          </div>
+        </div>
+
+        <nav class="nav-tabs" aria-label="Views">
+          <button class="nav-tab is-active" data-view="dashboard" type="button">Dashboard</button>
+          <button class="nav-tab" data-view="log" type="button">Material Log</button>
+          <button class="nav-tab" data-view="procurement" type="button">Procurement</button>
+          <button class="nav-tab" data-view="admin" type="button">Admin</button>
+        </nav>
+
+        <section class="panel goals">
+          <h2>App Goals</h2>
+          <ul>
+            <li>Keep every equipment and material item traceable from the baseline log.</li>
+            <li>Show what is late, unreleased, or still in procurement.</li>
+            <li>Give project teams fast filters by area, provider, status, and spec section.</li>
+            <li>Preserve notes and spreadsheet row references for auditability.</li>
+          </ul>
+        </section>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Baseline imported from EQUIPMENT &amp; MATERIAL LOG.xlsx</p>
+            <h2 id="view-title">Dashboard</h2>
+          </div>
+          <div class="top-actions">
+            <label class="search">
+              <span>Project</span>
+              <select id="projectSelect"></select>
+            </label>
+            <label class="search">
+              <span>Search</span>
+              <input id="searchInput" type="search" placeholder="Tag, item, provider, notes" />
+            </label>
+            <button class="ghost-button" id="resetFilters" type="button">Reset</button>
+          </div>
+        </header>
+
+        <section class="filters" aria-label="Filters">
+          <label>
+            Status
+            <select id="statusFilter"></select>
+          </label>
+          <label>
+            Area / Building
+            <select id="areaFilter"></select>
+          </label>
+          <label>
+            Provider
+            <select id="providerFilter"></select>
+          </label>
+          <label>
+            Timing
+            <select id="timingFilter">
+              <option value="all">All timing</option>
+              <option value="late">Late / due now</option>
+              <option value="30">Due within 30 days</option>
+              <option value="missing-release">Missing release date</option>
+              <option value="missing-delivery">Missing expected delivery</option>
+            </select>
+          </label>
+        </section>
+
+        <section class="column-controls" aria-label="Column controls">
+          <button class="ghost-button" id="addItemButton" type="button">Add Item</button>
+          <button class="ghost-button" id="exportExcelButton" type="button">Export Excel</button>
+          <button class="ghost-button" id="columnToggle" type="button" aria-expanded="false">Columns</button>
+          <div class="column-menu" id="columnMenu" hidden></div>
+        </section>
+
+        <section class="view is-active" id="dashboardView">
+          <div class="project-dashboard" id="projectDashboard"></div>
+        </section>
+
+        <section class="view" id="logView">
+          <div class="table-shell">
+            <table>
+              <thead>
+                <tr id="logHead"></tr>
+              </thead>
+              <tbody id="logBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="view" id="procurementView">
+          <div class="procurement-board" id="procurementBoard"></div>
+        </section>
+
+        <section class="view" id="adminView">
+          <div class="admin-grid">
+            <section class="panel admin-panel">
+              <div class="section-heading">
+                <h3>Projects</h3>
+                <span id="projectCount"></span>
+              </div>
+              <form class="admin-form" id="projectForm">
+                <input id="projectInput" type="text" placeholder="Add project" />
+                <button class="ghost-button" type="submit">Add</button>
+              </form>
+              <div class="admin-list" id="projectList"></div>
+            </section>
+
+            <section class="panel admin-panel">
+              <div class="section-heading">
+                <h3>Suppliers</h3>
+                <span id="supplierCount"></span>
+              </div>
+              <label class="admin-setting">
+                User Initials
+                <input id="userInitialsInput" type="text" maxlength="6" placeholder="JB" />
+              </label>
+              <form class="admin-form" id="supplierForm">
+                <input id="supplierInput" type="text" placeholder="Add supplier" />
+                <button class="ghost-button" type="submit">Add</button>
+              </form>
+              <div class="admin-list" id="supplierList"></div>
+            </section>
+
+            <section class="panel admin-panel">
+              <div class="section-heading">
+                <h3>Submittal Statuses</h3>
+                <span id="statusAdminCount"></span>
+              </div>
+              <form class="admin-form" id="statusAdminForm">
+                <input id="statusAdminInput" type="text" placeholder="Add status" />
+                <button class="ghost-button" type="submit">Add</button>
+              </form>
+              <div class="admin-list" id="statusAdminList"></div>
+            </section>
+
+            <section class="panel admin-panel">
+              <div class="section-heading">
+                <h3>Import Log</h3>
+                <span id="importStatus">Template ready</span>
+              </div>
+              <div class="admin-import-actions">
+                <button class="ghost-button" id="downloadTemplateButton" type="button">Download Excel Template</button>
+                <label class="admin-setting">
+                  Import Mode
+                  <select id="importMode">
+                    <option value="append">Append to current project</option>
+                    <option value="replace">Replace current project log</option>
+                  </select>
+                </label>
+                <label class="admin-setting">
+                  Import File
+                  <input id="importFileInput" type="file" accept=".xls,.xml,.csv,.tsv,.txt" />
+                </label>
+                <button class="ghost-button" id="importLogButton" type="button">Import Log</button>
+              </div>
+            </section>
+          </div>
+        </section>
+
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
