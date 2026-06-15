@@ -341,10 +341,11 @@ function collectLocalStorageSharedState() {
   const rowsByProject = {};
   normalizedProjects.forEach((project) => {
     const localRows = projectRowsFromStorage(project.id);
+    const isBaselineProject = project.baseline || project.id === "hampton-wwtp-phase-ii";
     rowsByProject[project.id] = localRows?.length
       ? localRows
-      : (project.baseline ? legacyBaselineRowsFromStorage() : []);
-    if (project.baseline && !rowsByProject[project.id].length) {
+      : (isBaselineProject ? legacyBaselineRowsFromStorage() : []);
+    if (isBaselineProject && !rowsByProject[project.id].length) {
       rowsByProject[project.id] = state.baseRows.map((row) => ({ ...row }));
     }
   });
