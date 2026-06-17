@@ -739,7 +739,9 @@ function serializeNotes(notes) {
 function notesForExport(value) {
   return parseNotes(value).map((note) => {
     const meta = [note.timestamp, note.initials].filter(Boolean).join(" - ");
-    return meta ? `${meta}: ${note.text}` : note.text;
+    const editedMeta = [note.editedTimestamp, note.editedInitials].filter(Boolean).join(" - ");
+    const editedText = editedMeta ? `\nEdited ${editedMeta}` : "";
+    return `${meta ? `${meta}: ` : ""}${note.text}${editedText}`;
   }).join("\n");
 }
 
@@ -957,6 +959,28 @@ function appendNote(row) {
     initials,
     text: clean(text),
   });
+  saveCellEdit(row, FIELD.notes, serializeNotes(notes));
+  state.filtered = state.rows.filter(matchesFilters);
+  renderLog();
+  renderDashboard();
+  renderProcurement();
+}
+
+function editItemNote(row, noteIndex) {
+  const notes = parseNotes(row[FIELD.notes]);
+  const note = notes[noteIndex];
+  if (!note) return;
+  const updatedText = prompt("Edit note:", note.text);
+  if (updatedText === null) return;
+  if (!clean(updatedText)) return;
+  const initials = ensureUserInitials();
+  if (!initials) return;
+  notes[noteIndex] = {
+    ...note,
+    text: clean(updatedText),
+    editedTimestamp: formatNoteTimestamp(),
+    editedInitials: initials,
+  };
   saveCellEdit(row, FIELD.notes, serializeNotes(notes));
   state.filtered = state.rows.filter(matchesFilters);
   renderLog();
@@ -1536,20 +1560,31 @@ function bindNoteButtons() {
       if (row) appendNote(row);
     });
   });
+  els.logBody.querySelectorAll("[data-edit-note-row]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const row = state.rows.find((candidate) => rowKey(candidate) === button.dataset.editNoteRow);
+      if (row) editItemNote(row, Number(button.dataset.noteIndex));
+    });
+  });
 }
 
 function renderNotesCell(row) {
   const notes = parseNotes(row[FIELD.notes]);
+  const key = rowKey(row);
   return `
     <td class="notes-cell">
       <div class="note-timeline">
-        ${notes.map((note) => `
+        ${notes.map((note, index) => `
           <div class="note-entry">
-            <div class="note-meta">${escapeHtml([note.timestamp, note.initials].filter(Boolean).join(" · "))}</div>
+            <div class="note-entry-header">
+              <div class="note-meta">${escapeHtml([note.timestamp, note.initials].filter(Boolean).join(" · "))}</div>
+              <button class="note-edit-button" type="button" data-edit-note-row="${escapeHtml(key)}" data-note-index="${index}">Edit</button>
+            </div>
             <div class="note-text">${escapeHtml(note.text)}</div>
+            ${note.editedTimestamp ? `<div class="note-edited-meta">${escapeHtml(["Edited", note.editedTimestamp, note.editedInitials].filter(Boolean).join(" · "))}</div>` : ""}
           </div>
         `).join("") || `<div class="meta">No notes yet.</div>`}
-        <button class="add-note-button" type="button" data-add-note-row="${escapeHtml(rowKey(row))}">Add Note</button>
+        <button class="add-note-button" type="button" data-add-note-row="${escapeHtml(key)}">Add Note</button>
       </div>
     </td>
   `;
