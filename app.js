@@ -12,6 +12,7 @@ const FIELD = {
   lead: "LEAD TIME (DAYS)",
   delivery: "EXPECTED DELIVERY",
   required: "DATE REQUIRED ONSITE",
+  critical: "Critical Item",
   delivered: "Delivered",
   stored: "Stored Location",
   remaining: "DAYS REMAININIG",
@@ -541,7 +542,7 @@ function editableValue(row, header) {
 
 function normalizeEditedValue(header, value) {
   const text = clean(value);
-  if (!text) return null;
+  if (!text) return [FIELD.critical, FIELD.delivered].includes(header) ? false : null;
   if ([FIELD.released, FIELD.delivery, FIELD.required].includes(header)) {
     return excelSerialFromDate(text);
   }
@@ -549,7 +550,7 @@ function normalizeEditedValue(header, value) {
     const valueNumber = Number(text);
     return Number.isFinite(valueNumber) ? valueNumber : text;
   }
-  if (header === FIELD.delivered) return Boolean(value);
+  if ([FIELD.critical, FIELD.delivered].includes(header)) return Boolean(value);
   return text;
 }
 
@@ -642,7 +643,7 @@ function saveDeletedItems() {
 function addItem() {
   const row = { _rowNumber: `new-${Date.now()}` };
   allTableHeaders().forEach((header) => {
-    row[header] = header === FIELD.delivered ? false : null;
+    row[header] = [FIELD.critical, FIELD.delivered].includes(header) ? false : null;
   });
   state.rows.unshift(row);
   saveAddedItems();
@@ -675,7 +676,7 @@ function clearLogPlacementFilters() {
 function createBlankItem() {
   const row = { _rowNumber: `new-${Date.now()}-${Math.floor(Math.random() * 1000)}` };
   allTableHeaders().forEach((header) => {
-    row[header] = header === FIELD.delivered ? false : null;
+    row[header] = [FIELD.critical, FIELD.delivered].includes(header) ? false : null;
   });
   return row;
 }
@@ -756,7 +757,7 @@ function xmlEscape(value) {
 }
 
 function exportValue(row, header) {
-  if (header === FIELD.delivered) return row[FIELD.delivered] ? "Yes" : "No";
+  if ([FIELD.critical, FIELD.delivered].includes(header)) return row[header] ? "Yes" : "No";
   if (header === FIELD.notes) return notesForExport(row[FIELD.notes]);
   if ([FIELD.released, FIELD.delivery, FIELD.required].includes(header)) return excelDate(row[header]) || "";
   return row[header] ?? "";
@@ -875,8 +876,8 @@ function parseExcelXml(text) {
 
 function importedValue(header, value) {
   const text = clean(value);
-  if (!text) return header === FIELD.delivered ? false : null;
-  if (header === FIELD.delivered) return ["YES", "TRUE", "Y", "1", "DELIVERED"].includes(normalizeKey(text));
+  if (!text) return [FIELD.critical, FIELD.delivered].includes(header) ? false : null;
+  if ([FIELD.critical, FIELD.delivered].includes(header)) return ["YES", "TRUE", "Y", "1", "CRITICAL", "DELIVERED"].includes(normalizeKey(text));
   if (header === FIELD.notes) {
     return serializeNotes([{ timestamp: formatNoteTimestamp(), initials: "Import", text }]);
   }
@@ -898,7 +899,7 @@ function rowsFromImportGrid(grid) {
       row[header] = importedValue(header, sourceIndex === undefined ? "" : line[sourceIndex]);
     });
     return row;
-  }).filter((row) => expectedHeaders.some((header) => header !== FIELD.delivered && clean(row[header])));
+  }).filter((row) => expectedHeaders.some((header) => ![FIELD.critical, FIELD.delivered].includes(header) && clean(row[header])));
 }
 
 async function importMaterialLog() {
@@ -1249,6 +1250,7 @@ function projectMetrics(rows) {
     const required = numeric(row[FIELD.required]);
     const delivered = Boolean(row[FIELD.delivered]);
     metrics.total += 1;
+    if (row[FIELD.critical]) metrics.critical += 1;
     if (required !== null && required < today && !delivered) metrics.overdue += 1;
     if (required !== null && required >= today && required <= today + 30 && !delivered) metrics.due30 += 1;
     if (required !== null && required >= today && required <= sixMonths && !delivered) metrics.due6Months += 1;
@@ -1258,18 +1260,34 @@ function projectMetrics(rows) {
     overdue: 0,
     due30: 0,
     due6Months: 0,
+    critical: 0,
   });
 }
 
-function openProjectLogWithRequiredDateFilter(projectId, range) {
-  loadProject(projectId);
+function resetTopFilters() {
   els.search.value = "";
   els.status.value = "all";
   els.area.value = "all";
   els.provider.value = "all";
   els.timing.value = "all";
+}
+
+function openProjectLogWithRequiredDateFilter(projectId, range) {
+  loadProject(projectId);
+  resetTopFilters();
   state.logColumnFilters = range ? { [FIELD.required]: range } : {};
   state.logSort = { column: FIELD.required, direction: "asc" };
+  saveLogControls();
+  state.filtered = state.rows.filter(matchesFilters);
+  renderLog();
+  setView("log");
+}
+
+function openProjectLogWithCriticalFilter(projectId) {
+  loadProject(projectId);
+  resetTopFilters();
+  state.logColumnFilters = { [FIELD.critical]: "true" };
+  state.logSort = { column: FIELD.critical, direction: "desc" };
   saveLogControls();
   state.filtered = state.rows.filter(matchesFilters);
   renderLog();
@@ -1294,6 +1312,7 @@ function renderDashboard() {
           <button class="metric-button" type="button" data-project-filter="${escapeHtml(project.id)}" data-required-range="overdue"><span>Items Overdue</span><strong>${metrics.overdue}</strong></button>
           <button class="metric-button" type="button" data-project-filter="${escapeHtml(project.id)}" data-required-range="next-30"><span>Items Due Within 30-Days</span><strong>${metrics.due30}</strong></button>
           <button class="metric-button" type="button" data-project-filter="${escapeHtml(project.id)}" data-required-range="next-6-months"><span>Items Due Within 6-Months</span><strong>${metrics.due6Months}</strong></button>
+          <button class="metric-button" type="button" data-critical-project="${escapeHtml(project.id)}"><span>Critical Items</span><strong>${metrics.critical}</strong></button>
         </div>
       </article>
     `;
@@ -1309,6 +1328,12 @@ function renderDashboard() {
   document.querySelectorAll("[data-project-filter]").forEach((button) => {
     button.addEventListener("click", () => {
       openProjectLogWithRequiredDateFilter(button.dataset.projectFilter, button.dataset.requiredRange);
+    });
+  });
+
+  document.querySelectorAll("[data-critical-project]").forEach((button) => {
+    button.addEventListener("click", () => {
+      openProjectLogWithCriticalFilter(button.dataset.criticalProject);
     });
   });
 }
@@ -1367,11 +1392,13 @@ function renderTable(head, body, rows, headers, raw = false) {
 
 function displayValue(row, header) {
   const value = row[header];
+  if (header === FIELD.critical) return value ? "Critical" : "";
   if (header === FIELD.delivered) return value ? "Delivered" : "";
   return [FIELD.released, FIELD.delivery, FIELD.required].includes(header) ? excelDate(value) : value;
 }
 
 function sortValue(row, header) {
+  if (header === FIELD.critical) return row[FIELD.critical] ? 1 : 0;
   if (header === FIELD.delivered) return row[FIELD.delivered] ? 1 : 0;
   if ([FIELD.released, FIELD.delivery, FIELD.required, FIELD.lead, FIELD.remaining].includes(header)) {
     const value = numeric(row[header]);
@@ -1388,7 +1415,7 @@ function dateConflict(row, header) {
 }
 
 function logHeaders() {
-  return [FIELD.tag, FIELD.item, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.delivered, FIELD.stored, FIELD.remaining, FIELD.notes];
+  return [FIELD.tag, FIELD.item, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.stored, FIELD.remaining, FIELD.notes];
 }
 
 function columnOptions(header) {
@@ -1412,6 +1439,7 @@ function getLogRows() {
 
   let rows = state.filtered.filter((row) => activeFilters.every(([header, value]) => {
     if (header === FIELD.required) return matchesRequiredDateRange(row, value);
+    if (header === FIELD.critical) return value === "true" ? Boolean(row[FIELD.critical]) : !Boolean(row[FIELD.critical]);
     return normalizeKey(displayValue(row, header)).includes(normalizeKey(value));
   }));
 
@@ -1448,13 +1476,7 @@ function renderLogHead() {
     const indicator = isSorted ? (state.logSort.direction === "asc" ? "ASC" : "DESC") : "";
     const hasAutocomplete = AUTOCOMPLETE_FILTERS.has(header);
     const datalistId = listIdForColumn(header);
-    const filterControl = header === FIELD.required
-      ? `
-        <select class="column-filter-input" data-filter-column="${escapeHtml(header)}">
-          ${requiredDateRangeOptions().map(([value, label]) => `<option value="${escapeHtml(value)}" ${state.logColumnFilters[header] === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
-        </select>
-      `
-      : `
+    let filterControl = `
         <input class="column-filter-input" data-filter-column="${escapeHtml(header)}" ${hasAutocomplete ? `list="${escapeHtml(datalistId)}"` : ""} value="${escapeHtml(state.logColumnFilters[header] || "")}" placeholder="Filter" />
         ${hasAutocomplete ? `
           <datalist id="${escapeHtml(datalistId)}">
@@ -1462,6 +1484,22 @@ function renderLogHead() {
           </datalist>
         ` : ""}
       `;
+    if (header === FIELD.required) {
+      filterControl = `
+        <select class="column-filter-input" data-filter-column="${escapeHtml(header)}">
+          ${requiredDateRangeOptions().map(([value, label]) => `<option value="${escapeHtml(value)}" ${state.logColumnFilters[header] === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
+        </select>
+      `;
+    }
+    if (header === FIELD.critical) {
+      filterControl = `
+        <select class="column-filter-input" data-filter-column="${escapeHtml(header)}">
+          <option value="" ${state.logColumnFilters[header] ? "" : "selected"}>All items</option>
+          <option value="true" ${state.logColumnFilters[header] === "true" ? "selected" : ""}>Critical only</option>
+          <option value="false" ${state.logColumnFilters[header] === "false" ? "selected" : ""}>Not critical</option>
+        </select>
+      `;
+    }
     return `
       <th>
         <div class="th-control">
@@ -1539,12 +1577,12 @@ function bindStatusSelects() {
   });
 }
 
-function bindDeliveredCheckboxes() {
-  els.logBody.querySelectorAll("[data-delivered-row]").forEach((checkbox) => {
+function bindLogCheckboxes() {
+  els.logBody.querySelectorAll("[data-checkbox-row]").forEach((checkbox) => {
     checkbox.addEventListener("change", () => {
-      const row = state.rows.find((candidate) => rowKey(candidate) === checkbox.dataset.deliveredRow);
+      const row = state.rows.find((candidate) => rowKey(candidate) === checkbox.dataset.checkboxRow);
       if (!row) return;
-      saveCellEdit(row, FIELD.delivered, checkbox.checked);
+      saveCellEdit(row, checkbox.dataset.checkboxColumn, checkbox.checked);
       state.filtered = state.rows.filter(matchesFilters);
       renderLog();
       renderDashboard();
@@ -1613,10 +1651,10 @@ function renderLogBody() {
             </td>
           `;
         }
-        if (header === FIELD.delivered) {
+        if ([FIELD.critical, FIELD.delivered].includes(header)) {
           return `
-            <td class="delivered-cell">
-              <input type="checkbox" data-delivered-row="${escapeHtml(rowKey(row))}" ${row[FIELD.delivered] ? "checked" : ""} aria-label="Delivered" />
+            <td class="checkbox-cell">
+              <input type="checkbox" data-checkbox-row="${escapeHtml(rowKey(row))}" data-checkbox-column="${escapeHtml(header)}" ${row[header] ? "checked" : ""} aria-label="${escapeHtml(header)}" />
             </td>
           `;
         }
@@ -1629,7 +1667,7 @@ function renderLogBody() {
   `).join("");
   bindEditableCells();
   bindStatusSelects();
-  bindDeliveredCheckboxes();
+  bindLogCheckboxes();
   bindNoteButtons();
   bindInsertButtons();
   bindRemoveButtons();
@@ -1650,7 +1688,7 @@ function bindRemoveButtons() {
 }
 
 function allTableHeaders() {
-  return [FIELD.tag, FIELD.item, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.delivered, FIELD.stored, FIELD.remaining, FIELD.notes];
+  return [FIELD.tag, FIELD.item, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.stored, FIELD.remaining, FIELD.notes];
 }
 
 function saveColumnPrefs() {

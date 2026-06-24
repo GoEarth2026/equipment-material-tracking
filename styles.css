@@ -362,7 +362,7 @@ select {
 
 .project-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(130px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 10px;
 }
 
@@ -652,6 +652,7 @@ td.date-conflict {
   outline: 2px solid rgba(122, 167, 217, 0.35);
 }
 
+.checkbox-cell,
 .delivered-cell {
   text-align: center;
   min-width: 88px;
@@ -692,6 +693,7 @@ td.date-conflict {
   border-color: #bad5cb;
 }
 
+.checkbox-cell input,
 .delivered-cell input {
   width: 18px;
   height: 18px;
