@@ -554,6 +554,22 @@ function normalizeEditedValue(header, value) {
   return text;
 }
 
+function calculatedExpectedDelivery(row) {
+  const released = numeric(row[FIELD.released]);
+  const lead = numeric(row[FIELD.lead]);
+  if (released === null || lead === null) return null;
+  return released + lead;
+}
+
+function applyExpectedDeliveryCalculation(row, savedEdits = null, force = false) {
+  const calculated = calculatedExpectedDelivery(row);
+  if (calculated === null) return false;
+  if (!force && clean(row[FIELD.delivery])) return false;
+  row[FIELD.delivery] = calculated;
+  if (savedEdits) savedEdits[FIELD.delivery] = calculated;
+  return true;
+}
+
 function loadSavedEdits() {
   try {
     const saved = JSON.parse(localStorage.getItem(EDIT_PREF_KEY) || "{}");
@@ -580,6 +596,9 @@ function saveCellEdit(row, header, value) {
   const key = rowKey(row);
   saved[key] = { ...(saved[key] || {}), [header]: value };
   row[header] = value;
+  if ([FIELD.released, FIELD.lead].includes(header)) {
+    applyExpectedDeliveryCalculation(row, saved[key], true);
+  }
   localStorage.setItem(EDIT_PREF_KEY, JSON.stringify(saved));
   if (header === FIELD.provider) addAdminValue("suppliers", value, false);
   if (isAddedRow(row)) saveAddedItems();
@@ -898,6 +917,7 @@ function rowsFromImportGrid(grid) {
       const sourceIndex = hasKnownHeaders ? headerMap.get(normalizeKey(header)) : index;
       row[header] = importedValue(header, sourceIndex === undefined ? "" : line[sourceIndex]);
     });
+    applyExpectedDeliveryCalculation(row);
     return row;
   }).filter((row) => expectedHeaders.some((header) => ![FIELD.critical, FIELD.delivered].includes(header) && clean(row[header])));
 }
