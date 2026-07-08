@@ -86,6 +86,9 @@ const els = {
   upcomingList: document.querySelector("#upcomingList"),
   logHead: document.querySelector("#logHead"),
   logBody: document.querySelector("#logBody"),
+  tableShell: document.querySelector(".table-shell"),
+  tableScrollTop: document.querySelector("#tableScrollTop"),
+  tableScrollTopInner: document.querySelector("#tableScrollTopInner"),
   procurementBoard: document.querySelector("#procurementBoard"),
   developmentNoteForm: document.querySelector("#developmentNoteForm"),
   developmentNoteInput: document.querySelector("#developmentNoteInput"),
@@ -1546,6 +1549,32 @@ function saveLogControls() {
   localStorage.setItem(LOG_SORT_PREF_KEY, JSON.stringify(state.logSort));
 }
 
+function syncTopScrollbarWidth() {
+  if (!els.tableShell || !els.tableScrollTopInner) return;
+  els.tableScrollTopInner.style.width = `${els.tableShell.scrollWidth}px`;
+  if (els.tableScrollTop) {
+    els.tableScrollTop.scrollLeft = els.tableShell.scrollLeft;
+  }
+}
+
+function bindTableScrollbars() {
+  if (!els.tableShell || !els.tableScrollTop) return;
+  let syncing = false;
+  els.tableShell.addEventListener("scroll", () => {
+    if (syncing) return;
+    syncing = true;
+    els.tableScrollTop.scrollLeft = els.tableShell.scrollLeft;
+    syncing = false;
+  });
+  els.tableScrollTop.addEventListener("scroll", () => {
+    if (syncing) return;
+    syncing = true;
+    els.tableShell.scrollLeft = els.tableScrollTop.scrollLeft;
+    syncing = false;
+  });
+  window.addEventListener("resize", syncTopScrollbarWidth);
+}
+
 function renderLogHead() {
   const headers = visibleLogHeaders();
   els.logHead.innerHTML = `
@@ -1619,6 +1648,72 @@ function renderLogHead() {
   });
 }
 
+function tabbableLogHeaders() {
+  return visibleLogHeaders().filter((header) => ![FIELD.qtyDelivered, FIELD.deliveries, FIELD.notes].includes(header));
+}
+
+function focusLogField(rowKeyValue, header) {
+  const escapeSelector = (value) => (window.CSS?.escape ? CSS.escape(value) : String(value).replace(/"/g, '\\"'));
+  const selector = `[data-log-field-row="${escapeSelector(rowKeyValue)}"][data-log-field-column="${escapeSelector(header)}"]`;
+  const target = els.logBody.querySelector(selector);
+  if (!target) return;
+  target.focus();
+  if (target.isContentEditable) {
+    const range = document.createRange();
+    range.selectNodeContents(target);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+}
+
+function focusAdjacentLogField(rowKeyValue, header, direction = 1) {
+  const rows = getLogRows();
+  const headers = tabbableLogHeaders();
+  const positions = [];
+  rows.forEach((row) => {
+    headers.forEach((fieldHeader) => {
+      positions.push({ rowKeyValue: rowKey(row), header: fieldHeader });
+    });
+  });
+  if (!positions.length) return;
+  const currentIndex = positions.findIndex((position) => position.rowKeyValue === rowKeyValue && position.header === header);
+  const fallbackIndex = direction > 0 ? 0 : positions.length - 1;
+  const nextIndex = currentIndex === -1
+    ? fallbackIndex
+    : Math.min(Math.max(currentIndex + direction, 0), positions.length - 1);
+  const next = positions[nextIndex];
+  requestAnimationFrame(() => focusLogField(next.rowKeyValue, next.header));
+}
+
+function bindLogFieldTabbing() {
+  els.logBody.querySelectorAll("[data-log-field-row]").forEach((control) => {
+    if (control.isContentEditable) return;
+    control.addEventListener("keydown", (event) => {
+      if (event.key !== "Tab") return;
+      event.preventDefault();
+      focusAdjacentLogField(control.dataset.logFieldRow, control.dataset.logFieldColumn, event.shiftKey ? -1 : 1);
+    });
+  });
+}
+
+function commitEditableCell(cell) {
+  const row = state.rows.find((candidate) => rowKey(candidate) === cell.dataset.editRow);
+  if (!row) return false;
+  const header = cell.dataset.editColumn;
+  const value = normalizeEditedValue(header, cell.textContent);
+  saveCellEdit(row, header, value);
+  state.filtered = state.rows.filter(matchesFilters);
+  renderAdmin();
+  populateGlobalFilters();
+  renderColumnMenu();
+  renderLog();
+  renderDashboard();
+  renderProcurement();
+  return true;
+}
+
 function bindEditableCells() {
   els.logBody.querySelectorAll("[data-edit-column]").forEach((cell) => {
     cell.addEventListener("keydown", (event) => {
@@ -1626,21 +1721,19 @@ function bindEditableCells() {
         event.preventDefault();
         cell.blur();
       }
+      if (event.key === "Tab") {
+        event.preventDefault();
+        const rowKeyValue = cell.dataset.editRow;
+        const header = cell.dataset.editColumn;
+        cell.dataset.skipBlurCommit = "true";
+        commitEditableCell(cell);
+        focusAdjacentLogField(rowKeyValue, header, event.shiftKey ? -1 : 1);
+      }
     });
 
     cell.addEventListener("blur", () => {
-      const row = state.rows.find((candidate) => rowKey(candidate) === cell.dataset.editRow);
-      if (!row) return;
-      const header = cell.dataset.editColumn;
-      const value = normalizeEditedValue(header, cell.textContent);
-      saveCellEdit(row, header, value);
-      state.filtered = state.rows.filter(matchesFilters);
-      renderAdmin();
-      populateGlobalFilters();
-      renderColumnMenu();
-      renderLog();
-      renderDashboard();
-      renderProcurement();
+      if (cell.dataset.skipBlurCommit === "true") return;
+      commitEditableCell(cell);
     });
   });
 }
@@ -1863,12 +1956,13 @@ function renderLogBody() {
       </td>
       ${headers.map((header) => {
         const display = displayValue(row, header);
+        const key = rowKey(row);
         if (header === FIELD.status) {
           const current = clean(display);
           const options = uniqueSorted([current, ...state.adminLists.statuses]);
           return `
             <td>
-              <select class="cell-select" data-status-row="${escapeHtml(rowKey(row))}">
+              <select class="cell-select" data-status-row="${escapeHtml(key)}" data-log-field-row="${escapeHtml(key)}" data-log-field-column="${escapeHtml(header)}">
                 <option value=""></option>
                 ${options.map((status) => `<option value="${escapeHtml(status)}" ${status === current ? "selected" : ""}>${escapeHtml(status)}</option>`).join("")}
               </select>
@@ -1878,7 +1972,7 @@ function renderLogBody() {
         if ([FIELD.critical, FIELD.delivered].includes(header)) {
           return `
             <td class="checkbox-cell">
-              <input type="checkbox" data-checkbox-row="${escapeHtml(rowKey(row))}" data-checkbox-column="${escapeHtml(header)}" ${row[header] ? "checked" : ""} aria-label="${escapeHtml(header)}" />
+              <input type="checkbox" data-checkbox-row="${escapeHtml(key)}" data-checkbox-column="${escapeHtml(header)}" data-log-field-row="${escapeHtml(key)}" data-log-field-column="${escapeHtml(header)}" ${row[header] ? "checked" : ""} aria-label="${escapeHtml(header)}" />
             </td>
           `;
         }
@@ -1891,17 +1985,19 @@ function renderLogBody() {
         if (header === FIELD.notes) {
           return renderNotesCell(row);
         }
-        return `<td class="editable-cell ${dateConflict(row, header) ? "date-conflict" : ""}" contenteditable="true" data-edit-row="${escapeHtml(rowKey(row))}" data-edit-column="${escapeHtml(header)}">${escapeHtml(editableValue(row, header))}</td>`;
+        return `<td class="editable-cell ${dateConflict(row, header) ? "date-conflict" : ""}" contenteditable="true" tabindex="0" data-edit-row="${escapeHtml(key)}" data-edit-column="${escapeHtml(header)}" data-log-field-row="${escapeHtml(key)}" data-log-field-column="${escapeHtml(header)}">${escapeHtml(editableValue(row, header))}</td>`;
       }).join("")}
     </tr>
   `).join("");
   bindEditableCells();
+  bindLogFieldTabbing();
   bindStatusSelects();
   bindLogCheckboxes();
   bindDeliveryButtons();
   bindNoteButtons();
   bindInsertButtons();
   bindRemoveButtons();
+  syncTopScrollbarWidth();
 }
 
 function bindInsertButtons() {
@@ -2123,6 +2219,9 @@ function setView(view) {
   }[view];
   const showColumnControls = view === "log";
   document.querySelector(".column-controls").style.display = showColumnControls ? "flex" : "none";
+  if (els.tableScrollTop) {
+    els.tableScrollTop.style.display = showColumnControls ? "block" : "none";
+  }
   document.querySelector(".filters").style.display = ["admin", "development"].includes(view) ? "none" : "grid";
   if (!showColumnControls) {
     els.columnMenu.hidden = true;
@@ -2257,6 +2356,7 @@ async function init() {
   });
 
   renderColumnMenu();
+  bindTableScrollbars();
   render();
   setView(initialView);
 }

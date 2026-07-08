@@ -600,6 +600,21 @@ select {
   box-shadow: var(--shadow);
 }
 
+.table-scroll-top {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 18px;
+  margin-bottom: 8px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.table-scroll-top div {
+  height: 1px;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
