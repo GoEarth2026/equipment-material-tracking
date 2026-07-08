@@ -875,6 +875,65 @@ th {
   text-transform: none;
 }
 
+.column-filter-combo {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  gap: 4px;
+}
+
+.filter-menu-button {
+  min-height: 30px;
+  border: 1px solid #c4cec9;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.column-filter-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 4;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid #c4cec9;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: var(--shadow);
+  padding: 4px;
+  text-transform: none;
+}
+
+.column-filter-menu button,
+.column-filter-menu span {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink);
+  padding: 7px 8px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: none;
+}
+
+.column-filter-menu button {
+  cursor: pointer;
+}
+
+.column-filter-menu button:hover,
+.column-filter-menu button:focus {
+  background: #edf2ef;
+  outline: none;
+}
+
 tr:hover td {
   background: #f8faf8;
 }

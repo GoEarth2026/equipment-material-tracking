@@ -1577,6 +1577,19 @@ function bindTableScrollbars() {
   window.addEventListener("resize", syncTopScrollbarWidth);
 }
 
+function closeColumnFilterMenus(exceptId = "") {
+  els.logHead.querySelectorAll(".column-filter-menu").forEach((menu) => {
+    if (menu.id !== exceptId) menu.hidden = true;
+  });
+}
+
+function openColumnFilterMenu(menuId) {
+  const menu = document.getElementById(menuId);
+  if (!menu) return;
+  closeColumnFilterMenus(menuId);
+  menu.hidden = false;
+}
+
 function renderLogHead() {
   const headers = visibleLogHeaders();
   els.logHead.innerHTML = `
@@ -1590,13 +1603,19 @@ function renderLogHead() {
     const indicator = isSorted ? (state.logSort.direction === "asc" ? "ASC" : "DESC") : "";
     const hasAutocomplete = AUTOCOMPLETE_FILTERS.has(header);
     const datalistId = listIdForColumn(header);
-    let filterControl = `
-        <input class="column-filter-input" data-filter-column="${escapeHtml(header)}" ${hasAutocomplete ? `list="${escapeHtml(datalistId)}"` : ""} value="${escapeHtml(state.logColumnFilters[header] || "")}" placeholder="Filter" />
-        ${hasAutocomplete ? `
-          <datalist id="${escapeHtml(datalistId)}">
-            ${columnOptions(header).map((value) => `<option value="${escapeHtml(value)}"></option>`).join("")}
-          </datalist>
-        ` : ""}
+    const options = hasAutocomplete ? columnOptions(header) : [];
+    let filterControl = hasAutocomplete
+      ? `
+        <div class="column-filter-combo">
+          <input class="column-filter-input" data-filter-column="${escapeHtml(header)}" data-filter-menu="${escapeHtml(datalistId)}" value="${escapeHtml(state.logColumnFilters[header] || "")}" placeholder="Filter" autocomplete="off" />
+          <button class="filter-menu-button" type="button" data-filter-menu-toggle="${escapeHtml(datalistId)}" aria-label="Show ${escapeHtml(header)} filter options">▾</button>
+          <div class="column-filter-menu" id="${escapeHtml(datalistId)}" hidden>
+            ${options.map((value) => `<button type="button" data-filter-option="${escapeHtml(header)}" data-filter-value="${escapeHtml(value)}">${escapeHtml(value)}</button>`).join("") || `<span>No values yet</span>`}
+          </div>
+        </div>
+      `
+      : `
+        <input class="column-filter-input" data-filter-column="${escapeHtml(header)}" value="${escapeHtml(state.logColumnFilters[header] || "")}" placeholder="Filter" />
       `;
     if (header === FIELD.required) {
       filterControl = `
@@ -1645,6 +1664,32 @@ function renderLogHead() {
     input.addEventListener("input", () => {
       state.logColumnFilters[input.dataset.filterColumn] = input.value;
       saveLogControls();
+      renderLogBody();
+    });
+    input.addEventListener("focus", () => {
+      if (input.dataset.filterMenu) openColumnFilterMenu(input.dataset.filterMenu);
+    });
+    input.addEventListener("click", () => {
+      if (input.dataset.filterMenu) openColumnFilterMenu(input.dataset.filterMenu);
+    });
+  });
+
+  els.logHead.querySelectorAll("[data-filter-menu-toggle]").forEach((button) => {
+    button.addEventListener("click", () => {
+      openColumnFilterMenu(button.dataset.filterMenuToggle);
+    });
+  });
+
+  els.logHead.querySelectorAll("[data-filter-option]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const header = button.dataset.filterOption;
+      const input = [...els.logHead.querySelectorAll("[data-filter-column]")]
+        .find((control) => control.dataset.filterColumn === header);
+      if (!input) return;
+      input.value = button.dataset.filterValue;
+      state.logColumnFilters[header] = input.value;
+      saveLogControls();
+      closeColumnFilterMenus();
       renderLogBody();
     });
   });
@@ -2350,6 +2395,9 @@ async function init() {
     if (!event.target.closest(".column-controls")) {
       els.columnMenu.hidden = true;
       els.columnToggle.setAttribute("aria-expanded", "false");
+    }
+    if (!event.target.closest(".column-filter-combo")) {
+      closeColumnFilterMenus();
     }
   });
 
