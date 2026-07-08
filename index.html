@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Equipment &amp; Material Tracking</title>
-    <link rel="stylesheet" href="./styles.css?v=filter-menus1" />
+    <link rel="stylesheet" href="./styles.css?v=delivery-modal1" />
   </head>
   <body>
     <div class="app-shell">
@@ -202,8 +202,51 @@
       </main>
     </div>
 
+    <dialog class="delivery-dialog" id="deliveryDialog">
+      <form method="dialog" id="deliveryForm">
+        <div class="delivery-dialog-header">
+          <h3 id="deliveryDialogTitle">Add Delivery</h3>
+          <button class="icon-row-button" id="deliveryDialogClose" type="button" aria-label="Close delivery form">×</button>
+        </div>
+        <div class="delivery-dialog-grid">
+          <label>
+            DELIVERY DATE
+            <input id="deliveryDateInput" type="text" placeholder="MM-DD-YYYY" />
+          </label>
+          <label>
+            DELIVERY TICKET #
+            <input id="deliveryTicketInput" type="text" />
+          </label>
+          <label>
+            QTY. DELIVERED
+            <input id="deliveryQtyInput" type="text" inputmode="decimal" />
+          </label>
+          <label>
+            UNITS
+            <input id="deliveryUnitsInput" type="text" />
+          </label>
+          <label>
+            UNIT PRICE - PER PO
+            <input id="deliveryUnitPricePoInput" type="text" inputmode="decimal" />
+          </label>
+          <label>
+            UNIT PRICE - PER INVOICE
+            <input id="deliveryUnitPriceInvoiceInput" type="text" inputmode="decimal" />
+          </label>
+          <label class="delivery-notes-field">
+            NOTES
+            <textarea id="deliveryNotesInput" rows="4"></textarea>
+          </label>
+        </div>
+        <div class="delivery-dialog-actions">
+          <button class="ghost-button" id="deliveryCancelButton" type="button">Cancel</button>
+          <button class="ghost-button primary-action" type="submit">Save Delivery</button>
+        </div>
+      </form>
+    </dialog>
+
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="./supabase-config.js"></script>
-    <script src="./app.js?v=filter-menus1"></script>
+    <script src="./app.js?v=delivery-modal1"></script>
   </body>
 </html>

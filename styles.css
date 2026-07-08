@@ -38,6 +38,67 @@ select {
   min-height: 100vh;
 }
 
+.delivery-dialog {
+  width: min(760px, calc(100vw - 32px));
+  border: 0;
+  border-radius: 8px;
+  padding: 0;
+  box-shadow: var(--shadow);
+}
+
+.delivery-dialog::backdrop {
+  background: rgba(23, 32, 29, 0.36);
+}
+
+.delivery-dialog form {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.delivery-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.delivery-dialog-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.delivery-dialog-grid label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.delivery-dialog-grid input,
+.delivery-dialog-grid textarea {
+  width: 100%;
+  margin-top: 6px;
+  text-transform: none;
+}
+
+.delivery-notes-field {
+  grid-column: 1 / -1;
+}
+
+.delivery-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.primary-action {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
 .sidebar {
   background: #24332e;
   color: #f8fbf8;
@@ -1117,5 +1178,9 @@ dd {
 
   .search input {
     width: 100%;
+  }
+
+  .delivery-dialog-grid {
+    grid-template-columns: 1fr;
   }
 }

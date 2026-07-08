@@ -46,6 +46,10 @@ const state = {
   cloudReady: false,
   cloudSaveTimer: null,
   adminListsLoadedFromCloud: false,
+  deliveryEditor: {
+    rowKey: "",
+    index: null,
+  },
 };
 
 const VALID_VIEWS = new Set(["dashboard", "log", "procurement", "development", "admin"]);
@@ -114,6 +118,18 @@ const els = {
   importFile: document.querySelector("#importFileInput"),
   importLog: document.querySelector("#importLogButton"),
   importStatus: document.querySelector("#importStatus"),
+  deliveryDialog: document.querySelector("#deliveryDialog"),
+  deliveryForm: document.querySelector("#deliveryForm"),
+  deliveryDialogTitle: document.querySelector("#deliveryDialogTitle"),
+  deliveryDialogClose: document.querySelector("#deliveryDialogClose"),
+  deliveryCancel: document.querySelector("#deliveryCancelButton"),
+  deliveryDate: document.querySelector("#deliveryDateInput"),
+  deliveryTicket: document.querySelector("#deliveryTicketInput"),
+  deliveryQty: document.querySelector("#deliveryQtyInput"),
+  deliveryUnits: document.querySelector("#deliveryUnitsInput"),
+  deliveryUnitPricePo: document.querySelector("#deliveryUnitPricePoInput"),
+  deliveryUnitPriceInvoice: document.querySelector("#deliveryUnitPriceInvoiceInput"),
+  deliveryNotes: document.querySelector("#deliveryNotesInput"),
 };
 
 function clean(value) {
@@ -493,6 +509,18 @@ function restoreProject(projectId) {
 function excelSerialFromDate(value) {
   const text = clean(value);
   if (!text) return "";
+  const dashedUsDate = text.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (dashedUsDate) {
+    const [, monthText, dayText, yearText] = dashedUsDate;
+    const month = Number(monthText);
+    const day = Number(dayText);
+    const year = Number(yearText);
+    const utc = Date.UTC(year, month - 1, day);
+    const parsed = new Date(utc);
+    if (parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day) {
+      return Math.round(utc / 86400000 + 25569);
+    }
+  }
   const parsed = new Date(text);
   if (Number.isNaN(parsed.getTime())) return value;
   const utc = Date.UTC(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
@@ -1821,34 +1849,60 @@ function normalizedNumberOrText(value) {
   return Number.isFinite(valueNumber) ? valueNumber : text;
 }
 
-function promptDeliveryDetails(existing = {}) {
-  const deliveryDate = prompt("DELIVERY DATE:", formattedDeliveryDate(existing) || "");
-  if (deliveryDate === null) return null;
-  const ticketNumber = prompt("DELIVERY TICKET #:", clean(existing.ticketNumber));
-  if (ticketNumber === null) return null;
-  const qtyDelivered = prompt("QTY. DELIVERED:", clean(existing.qtyDelivered));
-  if (qtyDelivered === null) return null;
-  const units = prompt("UNITS:", clean(existing.units));
-  if (units === null) return null;
-  const unitPricePo = prompt("UNIT PRICE - PER PO:", clean(existing.unitPricePo));
-  if (unitPricePo === null) return null;
-  const unitPriceInvoice = prompt("UNIT PRICE - PER INVOICE:", clean(existing.unitPriceInvoice));
-  if (unitPriceInvoice === null) return null;
-  const notes = prompt("NOTES:", clean(existing.notes));
-  if (notes === null) return null;
-
+function deliveryDetailsFromForm(existing = {}) {
   return {
     ...existing,
     id: existing.id || `delivery-${Date.now()}-${Math.floor(Math.random() * 1000000)}`,
-    deliveryDate: clean(deliveryDate) ? excelSerialFromDate(deliveryDate) : null,
-    ticketNumber: clean(ticketNumber),
-    qtyDelivered: normalizedNumberOrText(qtyDelivered),
-    units: clean(units),
-    unitPricePo: normalizedNumberOrText(unitPricePo),
-    unitPriceInvoice: normalizedNumberOrText(unitPriceInvoice),
-    notes: clean(notes),
+    deliveryDate: clean(els.deliveryDate.value) ? excelSerialFromDate(els.deliveryDate.value) : null,
+    ticketNumber: clean(els.deliveryTicket.value),
+    qtyDelivered: normalizedNumberOrText(els.deliveryQty.value),
+    units: clean(els.deliveryUnits.value),
+    unitPricePo: normalizedNumberOrText(els.deliveryUnitPricePo.value),
+    unitPriceInvoice: normalizedNumberOrText(els.deliveryUnitPriceInvoice.value),
+    notes: clean(els.deliveryNotes.value),
     updatedAt: new Date().toISOString(),
   };
+}
+
+function closeDeliveryDialog() {
+  if (!els.deliveryDialog) return;
+  els.deliveryDialog.close();
+  state.deliveryEditor = { rowKey: "", index: null };
+}
+
+function openDeliveryDialog(row, index = null) {
+  const deliveries = rowDeliveries(row);
+  const existing = index === null ? {} : deliveries[index] || {};
+  state.deliveryEditor = { rowKey: rowKey(row), index };
+  els.deliveryDialogTitle.textContent = index === null ? "Add Delivery" : "Edit Delivery";
+  els.deliveryDate.value = formattedDeliveryDate(existing) || "";
+  els.deliveryTicket.value = clean(existing.ticketNumber);
+  els.deliveryQty.value = clean(existing.qtyDelivered);
+  els.deliveryUnits.value = clean(existing.units);
+  els.deliveryUnitPricePo.value = clean(existing.unitPricePo);
+  els.deliveryUnitPriceInvoice.value = clean(existing.unitPriceInvoice);
+  els.deliveryNotes.value = clean(existing.notes);
+  els.deliveryDialog.showModal();
+  els.deliveryDate.focus();
+}
+
+function saveDeliveryDialog() {
+  const row = state.rows.find((candidate) => rowKey(candidate) === state.deliveryEditor.rowKey);
+  if (!row) return;
+  const deliveries = rowDeliveries(row);
+  const index = state.deliveryEditor.index;
+  const existing = index === null ? {} : deliveries[index] || {};
+  const delivery = deliveryDetailsFromForm(existing);
+  if (index === null) {
+    deliveries.push({
+      ...delivery,
+      createdAt: delivery.updatedAt,
+    });
+  } else {
+    deliveries[index] = delivery;
+  }
+  closeDeliveryDialog();
+  saveDeliveryChanges(row);
 }
 
 function saveDeliveryChanges(row) {
@@ -1862,23 +1916,14 @@ function saveDeliveryChanges(row) {
 }
 
 function addDelivery(row) {
-  const delivery = promptDeliveryDetails();
-  if (!delivery) return;
-  rowDeliveries(row).push({
-    ...delivery,
-    createdAt: delivery.updatedAt,
-  });
-  saveDeliveryChanges(row);
+  openDeliveryDialog(row);
 }
 
 function editDelivery(row, index) {
   const deliveries = rowDeliveries(row);
   const delivery = deliveries[index];
   if (!delivery) return;
-  const updated = promptDeliveryDetails(delivery);
-  if (!updated) return;
-  deliveries[index] = updated;
-  saveDeliveryChanges(row);
+  openDeliveryDialog(row, index);
 }
 
 function removeDelivery(row, index) {
@@ -2355,6 +2400,14 @@ async function init() {
   els.downloadTemplate.addEventListener("click", downloadImportTemplate);
 
   els.importLog.addEventListener("click", importMaterialLog);
+
+  els.deliveryForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveDeliveryDialog();
+  });
+
+  els.deliveryCancel.addEventListener("click", closeDeliveryDialog);
+  els.deliveryDialogClose.addEventListener("click", closeDeliveryDialog);
 
   els.developmentNoteForm.addEventListener("submit", (event) => {
     event.preventDefault();
