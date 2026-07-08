@@ -1762,6 +1762,7 @@ function focusLogField(rowKeyValue, header) {
   const target = els.logBody.querySelector(selector);
   if (!target) return;
   target.focus();
+  target.scrollIntoView({ block: "nearest", inline: "nearest" });
   if (target.isContentEditable) {
     const range = document.createRange();
     range.selectNodeContents(target);
@@ -1770,6 +1771,17 @@ function focusLogField(rowKeyValue, header) {
     selection.removeAllRanges();
     selection.addRange(range);
   }
+}
+
+function focusDirectionalLogField(rowKeyValue, header, rowOffset = 0, columnOffset = 0) {
+  const rows = getLogRows();
+  const headers = tabbableLogHeaders();
+  const rowIndex = rows.findIndex((row) => rowKey(row) === rowKeyValue);
+  const columnIndex = headers.indexOf(header);
+  if (rowIndex === -1 || columnIndex === -1) return;
+  const nextRowIndex = Math.min(Math.max(rowIndex + rowOffset, 0), rows.length - 1);
+  const nextColumnIndex = Math.min(Math.max(columnIndex + columnOffset, 0), headers.length - 1);
+  requestAnimationFrame(() => focusLogField(rowKey(rows[nextRowIndex]), headers[nextColumnIndex]));
 }
 
 function focusAdjacentLogField(rowKeyValue, header, direction = 1) {
@@ -1791,13 +1803,31 @@ function focusAdjacentLogField(rowKeyValue, header, direction = 1) {
   requestAnimationFrame(() => focusLogField(next.rowKeyValue, next.header));
 }
 
+function logArrowOffset(key) {
+  if (key === "ArrowLeft") return { rowOffset: 0, columnOffset: -1 };
+  if (key === "ArrowRight") return { rowOffset: 0, columnOffset: 1 };
+  if (key === "ArrowUp") return { rowOffset: -1, columnOffset: 0 };
+  if (key === "ArrowDown") return { rowOffset: 1, columnOffset: 0 };
+  return null;
+}
+
+function moveLogFieldWithArrow(event, rowKeyValue, header) {
+  const offset = logArrowOffset(event.key);
+  if (!offset) return false;
+  event.preventDefault();
+  focusDirectionalLogField(rowKeyValue, header, offset.rowOffset, offset.columnOffset);
+  return true;
+}
+
 function bindLogFieldTabbing() {
   els.logBody.querySelectorAll("[data-log-field-row]").forEach((control) => {
     if (control.isContentEditable) return;
     control.addEventListener("keydown", (event) => {
-      if (event.key !== "Tab") return;
-      event.preventDefault();
-      focusAdjacentLogField(control.dataset.logFieldRow, control.dataset.logFieldColumn, event.shiftKey ? -1 : 1);
+      if (moveLogFieldWithArrow(event, control.dataset.logFieldRow, control.dataset.logFieldColumn)) return;
+      if (event.key === "Tab") {
+        event.preventDefault();
+        focusAdjacentLogField(control.dataset.logFieldRow, control.dataset.logFieldColumn, event.shiftKey ? -1 : 1);
+      }
     });
   });
 }
@@ -1832,6 +1862,15 @@ function bindEditableCells() {
         cell.dataset.skipBlurCommit = "true";
         commitEditableCell(cell);
         focusAdjacentLogField(rowKeyValue, header, event.shiftKey ? -1 : 1);
+      }
+      const offset = logArrowOffset(event.key);
+      if (offset) {
+        event.preventDefault();
+        const rowKeyValue = cell.dataset.editRow;
+        const header = cell.dataset.editColumn;
+        cell.dataset.skipBlurCommit = "true";
+        commitEditableCell(cell);
+        focusDirectionalLogField(rowKeyValue, header, offset.rowOffset, offset.columnOffset);
       }
     });
 
