@@ -58,7 +58,16 @@ const state = {
 };
 
 const VALID_VIEWS = new Set(["dashboard", "log", "procurement", "development", "admin"]);
-const AUTOCOMPLETE_FILTERS = new Set([FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.status]);
+const AUTOCOMPLETE_FILTERS = new Set([
+  FIELD.drawing,
+  FIELD.spec,
+  FIELD.provider,
+  FIELD.area,
+  FIELD.room,
+  FIELD.system,
+  FIELD.submittal,
+  FIELD.status,
+]);
 const COLUMN_PREF_KEY = "equipmentMaterialHiddenColumns";
 const LOG_FILTER_PREF_KEY = "equipmentMaterialLogColumnFilters";
 const LOG_SORT_PREF_KEY = "equipmentMaterialLogSort";
