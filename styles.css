@@ -706,8 +706,46 @@ td.date-conflict {
   min-width: 280px;
 }
 
+.deliveries-cell {
+  min-width: 360px;
+}
+
+.calculated-cell {
+  background: #f7faf8;
+  color: var(--ink);
+  font-weight: 800;
+  text-align: right;
+}
+
+.delivery-tracker,
 .note-timeline {
   display: grid;
+  gap: 8px;
+}
+
+.delivery-list {
+  display: grid;
+  gap: 8px;
+}
+
+.delivery-entry {
+  border-left: 3px solid #8aa9c8;
+  padding-left: 8px;
+  display: grid;
+  gap: 3px;
+}
+
+.delivery-entry-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.delivery-actions {
+  display: flex;
   gap: 8px;
 }
 
@@ -752,6 +790,10 @@ td.date-conflict {
   font-size: 11px;
   font-weight: 800;
   padding: 0;
+}
+
+.note-edit-button.danger {
+  color: var(--danger);
 }
 
 .add-note-button {

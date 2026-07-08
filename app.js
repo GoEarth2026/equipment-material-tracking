@@ -4,6 +4,7 @@ const FIELD = {
   tag: "TAG #",
   item: "ITEM DESCRIPTION",
   quantity: "QUANTITY",
+  qtyDelivered: "QTY. DELIVERED",
   spec: "SPECIFICATION SECTION",
   provider: "PROVIDED BY:",
   area: "AREA / BUILDING",
@@ -15,6 +16,7 @@ const FIELD = {
   required: "DATE REQUIRED ONSITE",
   critical: "Critical Item",
   delivered: "Delivered",
+  deliveries: "Deliveries",
   stored: "Stored Location",
   remaining: "DAYS REMAININIG",
   notes: "NOTES",
@@ -555,6 +557,37 @@ function normalizeEditedValue(header, value) {
   return text;
 }
 
+function rowDeliveries(row) {
+  if (!Array.isArray(row._deliveries)) row._deliveries = [];
+  return row._deliveries;
+}
+
+function quantityDelivered(row) {
+  return rowDeliveries(row).reduce((total, delivery) => {
+    const quantity = numeric(delivery.qtyDelivered);
+    return total + (quantity === null ? 0 : quantity);
+  }, 0);
+}
+
+function syncDeliveredFromDeliveryQuantity(row) {
+  const requiredQuantity = numeric(row[FIELD.quantity]);
+  if (requiredQuantity === null || requiredQuantity <= 0) return;
+  row[FIELD.delivered] = quantityDelivered(row) >= requiredQuantity;
+}
+
+function formattedDeliveryDate(delivery) {
+  return excelDate(delivery.deliveryDate) || clean(delivery.deliveryDate);
+}
+
+function formattedDeliveryMoney(value) {
+  const amount = numeric(value);
+  if (amount === null) return clean(value);
+  return amount.toLocaleString(undefined, {
+    style: "currency",
+    currency: "USD",
+  });
+}
+
 function calculatedExpectedDelivery(row) {
   const released = numeric(row[FIELD.released]);
   const lead = numeric(row[FIELD.lead]);
@@ -599,6 +632,10 @@ function saveCellEdit(row, header, value) {
   row[header] = value;
   if ([FIELD.released, FIELD.lead].includes(header)) {
     applyExpectedDeliveryCalculation(row, saved[key], true);
+  }
+  if (header === FIELD.quantity) {
+    syncDeliveredFromDeliveryQuantity(row);
+    saved[key][FIELD.delivered] = row[FIELD.delivered];
   }
   localStorage.setItem(EDIT_PREF_KEY, JSON.stringify(saved));
   if (header === FIELD.provider) addAdminValue("suppliers", value, false);
@@ -766,6 +803,22 @@ function notesForExport(value) {
   }).join("\n");
 }
 
+function deliveriesForExport(row) {
+  return rowDeliveries(row).map((delivery, index) => {
+    const parts = [
+      `Delivery ${index + 1}`,
+      formattedDeliveryDate(delivery),
+      clean(delivery.ticketNumber) ? `Ticket: ${delivery.ticketNumber}` : "",
+      clean(delivery.qtyDelivered) ? `Qty: ${delivery.qtyDelivered}` : "",
+      clean(delivery.units) ? `Units: ${delivery.units}` : "",
+      clean(delivery.unitPricePo) ? `Unit Price - PO: ${formattedDeliveryMoney(delivery.unitPricePo)}` : "",
+      clean(delivery.unitPriceInvoice) ? `Unit Price - Invoice: ${formattedDeliveryMoney(delivery.unitPriceInvoice)}` : "",
+      clean(delivery.notes) ? `Notes: ${delivery.notes}` : "",
+    ].filter(Boolean);
+    return parts.join(" | ");
+  }).join("\n");
+}
+
 function xmlEscape(value) {
   return clean(value).replace(/[<>&'"]/g, (char) => ({
     "<": "&lt;",
@@ -777,6 +830,8 @@ function xmlEscape(value) {
 }
 
 function exportValue(row, header) {
+  if (header === FIELD.qtyDelivered) return quantityDelivered(row);
+  if (header === FIELD.deliveries) return deliveriesForExport(row);
   if ([FIELD.critical, FIELD.delivered].includes(header)) return row[header] ? "Yes" : "No";
   if (header === FIELD.notes) return notesForExport(row[FIELD.notes]);
   if ([FIELD.released, FIELD.delivery, FIELD.required].includes(header)) return excelDate(row[header]) || "";
@@ -896,6 +951,7 @@ function parseExcelXml(text) {
 
 function importedValue(header, value) {
   const text = clean(value);
+  if ([FIELD.qtyDelivered, FIELD.deliveries].includes(header)) return null;
   if (!text) return [FIELD.critical, FIELD.delivered].includes(header) ? false : null;
   if ([FIELD.critical, FIELD.delivered].includes(header)) return ["YES", "TRUE", "Y", "1", "CRITICAL", "DELIVERED"].includes(normalizeKey(text));
   if (header === FIELD.notes) {
@@ -920,7 +976,7 @@ function rowsFromImportGrid(grid) {
     });
     applyExpectedDeliveryCalculation(row);
     return row;
-  }).filter((row) => expectedHeaders.some((header) => ![FIELD.critical, FIELD.delivered].includes(header) && clean(row[header])));
+  }).filter((row) => expectedHeaders.some((header) => ![FIELD.critical, FIELD.delivered, FIELD.qtyDelivered, FIELD.deliveries].includes(header) && clean(row[header])));
 }
 
 async function importMaterialLog() {
@@ -1213,6 +1269,8 @@ function matchesFilters(row) {
     row[FIELD.tag],
     row[FIELD.item],
     row[FIELD.quantity],
+    quantityDelivered(row),
+    deliveriesForExport(row),
     row[FIELD.spec],
     row[FIELD.provider],
     row[FIELD.area],
@@ -1414,12 +1472,15 @@ function renderTable(head, body, rows, headers, raw = false) {
 
 function displayValue(row, header) {
   const value = row[header];
+  if (header === FIELD.qtyDelivered) return quantityDelivered(row);
+  if (header === FIELD.deliveries) return deliveriesForExport(row);
   if (header === FIELD.critical) return value ? "Critical" : "";
   if (header === FIELD.delivered) return value ? "Delivered" : "";
   return [FIELD.released, FIELD.delivery, FIELD.required].includes(header) ? excelDate(value) : value;
 }
 
 function sortValue(row, header) {
+  if (header === FIELD.qtyDelivered) return quantityDelivered(row);
   if (header === FIELD.critical) return row[FIELD.critical] ? 1 : 0;
   if (header === FIELD.delivered) return row[FIELD.delivered] ? 1 : 0;
   if ([FIELD.quantity, FIELD.released, FIELD.delivery, FIELD.required, FIELD.lead, FIELD.remaining].includes(header)) {
@@ -1437,7 +1498,7 @@ function dateConflict(row, header) {
 }
 
 function logHeaders() {
-  return [FIELD.tag, FIELD.item, FIELD.quantity, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.stored, FIELD.remaining, FIELD.notes];
+  return [FIELD.tag, FIELD.item, FIELD.quantity, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
 }
 
 function columnOptions(header) {
@@ -1613,6 +1674,104 @@ function bindLogCheckboxes() {
   });
 }
 
+function normalizedNumberOrText(value) {
+  const text = clean(value);
+  if (!text) return null;
+  const valueNumber = Number(text.replace(/[$,]/g, ""));
+  return Number.isFinite(valueNumber) ? valueNumber : text;
+}
+
+function promptDeliveryDetails(existing = {}) {
+  const deliveryDate = prompt("DELIVERY DATE:", formattedDeliveryDate(existing) || "");
+  if (deliveryDate === null) return null;
+  const ticketNumber = prompt("DELIVERY TICKET #:", clean(existing.ticketNumber));
+  if (ticketNumber === null) return null;
+  const qtyDelivered = prompt("QTY. DELIVERED:", clean(existing.qtyDelivered));
+  if (qtyDelivered === null) return null;
+  const units = prompt("UNITS:", clean(existing.units));
+  if (units === null) return null;
+  const unitPricePo = prompt("UNIT PRICE - PER PO:", clean(existing.unitPricePo));
+  if (unitPricePo === null) return null;
+  const unitPriceInvoice = prompt("UNIT PRICE - PER INVOICE:", clean(existing.unitPriceInvoice));
+  if (unitPriceInvoice === null) return null;
+  const notes = prompt("NOTES:", clean(existing.notes));
+  if (notes === null) return null;
+
+  return {
+    ...existing,
+    id: existing.id || `delivery-${Date.now()}-${Math.floor(Math.random() * 1000000)}`,
+    deliveryDate: clean(deliveryDate) ? excelSerialFromDate(deliveryDate) : null,
+    ticketNumber: clean(ticketNumber),
+    qtyDelivered: normalizedNumberOrText(qtyDelivered),
+    units: clean(units),
+    unitPricePo: normalizedNumberOrText(unitPricePo),
+    unitPriceInvoice: normalizedNumberOrText(unitPriceInvoice),
+    notes: clean(notes),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function saveDeliveryChanges(row) {
+  syncDeliveredFromDeliveryQuantity(row);
+  if (isAddedRow(row)) saveAddedItems();
+  saveCurrentProjectRows();
+  state.filtered = state.rows.filter(matchesFilters);
+  renderLog();
+  renderDashboard();
+  renderProcurement();
+}
+
+function addDelivery(row) {
+  const delivery = promptDeliveryDetails();
+  if (!delivery) return;
+  rowDeliveries(row).push({
+    ...delivery,
+    createdAt: delivery.updatedAt,
+  });
+  saveDeliveryChanges(row);
+}
+
+function editDelivery(row, index) {
+  const deliveries = rowDeliveries(row);
+  const delivery = deliveries[index];
+  if (!delivery) return;
+  const updated = promptDeliveryDetails(delivery);
+  if (!updated) return;
+  deliveries[index] = updated;
+  saveDeliveryChanges(row);
+}
+
+function removeDelivery(row, index) {
+  const deliveries = rowDeliveries(row);
+  const delivery = deliveries[index];
+  if (!delivery) return;
+  const label = clean(delivery.ticketNumber) || formattedDeliveryDate(delivery) || `delivery ${index + 1}`;
+  if (!confirm(`Remove ${label}?`)) return;
+  deliveries.splice(index, 1);
+  saveDeliveryChanges(row);
+}
+
+function bindDeliveryButtons() {
+  els.logBody.querySelectorAll("[data-add-delivery-row]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const row = state.rows.find((candidate) => rowKey(candidate) === button.dataset.addDeliveryRow);
+      if (row) addDelivery(row);
+    });
+  });
+  els.logBody.querySelectorAll("[data-edit-delivery-row]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const row = state.rows.find((candidate) => rowKey(candidate) === button.dataset.editDeliveryRow);
+      if (row) editDelivery(row, Number(button.dataset.deliveryIndex));
+    });
+  });
+  els.logBody.querySelectorAll("[data-remove-delivery-row]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const row = state.rows.find((candidate) => rowKey(candidate) === button.dataset.removeDeliveryRow);
+      if (row) removeDelivery(row, Number(button.dataset.deliveryIndex));
+    });
+  });
+}
+
 function bindNoteButtons() {
   els.logBody.querySelectorAll("[data-add-note-row]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -1650,6 +1809,49 @@ function renderNotesCell(row) {
   `;
 }
 
+function renderDeliveriesCell(row) {
+  const deliveries = rowDeliveries(row);
+  const key = rowKey(row);
+  const deliveredQuantity = quantityDelivered(row);
+  const requiredQuantity = numeric(row[FIELD.quantity]);
+  const units = clean(deliveries.find((delivery) => clean(delivery.units))?.units);
+  const summary = requiredQuantity === null
+    ? `${deliveredQuantity}${units ? ` ${units}` : ""} delivered`
+    : `${deliveredQuantity}${units ? ` ${units}` : ""} of ${requiredQuantity} delivered`;
+
+  return `
+    <td class="deliveries-cell">
+      <div class="delivery-tracker">
+        <strong>${escapeHtml(summary)}</strong>
+        <div class="delivery-list">
+          ${deliveries.map((delivery, index) => `
+            <div class="delivery-entry">
+              <div class="delivery-entry-header">
+                <span>${escapeHtml(formattedDeliveryDate(delivery) || "No date")}</span>
+                <div class="delivery-actions">
+                  <button class="note-edit-button" type="button" data-edit-delivery-row="${escapeHtml(key)}" data-delivery-index="${index}">Edit</button>
+                  <button class="note-edit-button danger" type="button" data-remove-delivery-row="${escapeHtml(key)}" data-delivery-index="${index}">Remove</button>
+                </div>
+              </div>
+              <div class="meta">${escapeHtml([
+                clean(delivery.ticketNumber) ? `Ticket ${delivery.ticketNumber}` : "",
+                clean(delivery.qtyDelivered) ? `Qty ${delivery.qtyDelivered}` : "",
+                clean(delivery.units),
+              ].filter(Boolean).join(" · "))}</div>
+              <div class="meta">${escapeHtml([
+                clean(delivery.unitPricePo) ? `PO ${formattedDeliveryMoney(delivery.unitPricePo)}` : "",
+                clean(delivery.unitPriceInvoice) ? `Invoice ${formattedDeliveryMoney(delivery.unitPriceInvoice)}` : "",
+              ].filter(Boolean).join(" · "))}</div>
+              ${clean(delivery.notes) ? `<div class="note-text">${escapeHtml(delivery.notes)}</div>` : ""}
+            </div>
+          `).join("") || `<div class="meta">No deliveries yet.</div>`}
+        </div>
+        <button class="add-note-button" type="button" data-add-delivery-row="${escapeHtml(key)}">Add Delivery</button>
+      </div>
+    </td>
+  `;
+}
+
 function renderLogBody() {
   const headers = visibleLogHeaders();
   const rows = getLogRows();
@@ -1680,6 +1882,12 @@ function renderLogBody() {
             </td>
           `;
         }
+        if (header === FIELD.qtyDelivered) {
+          return `<td class="calculated-cell">${escapeHtml(display)}</td>`;
+        }
+        if (header === FIELD.deliveries) {
+          return renderDeliveriesCell(row);
+        }
         if (header === FIELD.notes) {
           return renderNotesCell(row);
         }
@@ -1690,6 +1898,7 @@ function renderLogBody() {
   bindEditableCells();
   bindStatusSelects();
   bindLogCheckboxes();
+  bindDeliveryButtons();
   bindNoteButtons();
   bindInsertButtons();
   bindRemoveButtons();
@@ -1710,7 +1919,7 @@ function bindRemoveButtons() {
 }
 
 function allTableHeaders() {
-  return [FIELD.tag, FIELD.item, FIELD.quantity, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.stored, FIELD.remaining, FIELD.notes];
+  return [FIELD.tag, FIELD.item, FIELD.quantity, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
 }
 
 function saveColumnPrefs() {
