@@ -979,7 +979,8 @@ th {
 }
 
 .column-filter-menu button,
-.column-filter-menu span {
+.column-filter-menu > span,
+.column-filter-option {
   display: block;
   width: 100%;
   border: 0;
@@ -997,8 +998,33 @@ th {
   cursor: pointer;
 }
 
+.column-filter-option {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+}
+
+.column-filter-option input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+.column-filter-option span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.filter-clear-button {
+  color: var(--accent);
+  font-weight: 800;
+}
+
 .column-filter-menu button:hover,
-.column-filter-menu button:focus {
+.column-filter-menu button:focus,
+.column-filter-option:hover,
+.column-filter-option:focus-within {
   background: #edf2ef;
   outline: none;
 }

@@ -1578,14 +1578,55 @@ function visibleLogHeaders() {
   return logHeaders().filter((header) => !state.hiddenColumns.has(header));
 }
 
+function filterText(filter) {
+  if (filter && typeof filter === "object" && !Array.isArray(filter)) return clean(filter.text);
+  return clean(filter);
+}
+
+function filterSelections(filter) {
+  if (!filter || typeof filter !== "object" || Array.isArray(filter)) return [];
+  return Array.isArray(filter.selected) ? filter.selected.map(clean).filter(Boolean) : [];
+}
+
+function hasLogFilter(filter) {
+  return Boolean(filterText(filter) || filterSelections(filter).length);
+}
+
+function setLogFilterText(header, text) {
+  const selected = filterSelections(state.logColumnFilters[header]);
+  const cleanedText = clean(text);
+  state.logColumnFilters[header] = selected.length ? { text: cleanedText, selected } : cleanedText;
+}
+
+function toggleLogFilterSelection(header, value) {
+  const text = filterText(state.logColumnFilters[header]);
+  const selected = new Set(filterSelections(state.logColumnFilters[header]));
+  if (selected.has(value)) {
+    selected.delete(value);
+  } else {
+    selected.add(value);
+  }
+  const selectedValues = [...selected].sort((a, b) => a.localeCompare(b));
+  state.logColumnFilters[header] = selectedValues.length ? { text, selected: selectedValues } : text;
+}
+
+function clearLogFilterSelections(header) {
+  state.logColumnFilters[header] = filterText(state.logColumnFilters[header]);
+}
+
 function getLogRows() {
   const activeFilters = Object.entries(state.logColumnFilters)
-    .filter(([, value]) => clean(value));
+    .filter(([, value]) => hasLogFilter(value));
 
   let rows = state.filtered.filter((row) => activeFilters.every(([header, value]) => {
-    if (header === FIELD.required) return matchesRequiredDateRange(row, value);
-    if (header === FIELD.critical) return value === "true" ? Boolean(row[FIELD.critical]) : !Boolean(row[FIELD.critical]);
-    return normalizeKey(displayValue(row, header)).includes(normalizeKey(value));
+    const text = filterText(value);
+    const selected = filterSelections(value);
+    if (header === FIELD.required) return matchesRequiredDateRange(row, text);
+    if (header === FIELD.critical) return text === "true" ? Boolean(row[FIELD.critical]) : !Boolean(row[FIELD.critical]);
+    const display = clean(displayValue(row, header));
+    const textMatches = !text || normalizeKey(display).includes(normalizeKey(text));
+    const selectionMatches = !selected.length || selected.some((selection) => normalizeKey(display) === normalizeKey(selection));
+    return textMatches && selectionMatches;
   }));
 
   if (state.logSort.column) {
@@ -1661,32 +1702,39 @@ function renderLogHead() {
     const hasAutocomplete = AUTOCOMPLETE_FILTERS.has(header);
     const datalistId = listIdForColumn(header);
     const options = hasAutocomplete ? columnOptions(header) : [];
+    const selectedOptions = filterSelections(state.logColumnFilters[header]);
     let filterControl = hasAutocomplete
       ? `
         <div class="column-filter-combo">
-          <input class="column-filter-input" data-filter-column="${escapeHtml(header)}" data-filter-menu="${escapeHtml(datalistId)}" value="${escapeHtml(state.logColumnFilters[header] || "")}" placeholder="Filter" autocomplete="off" />
+          <input class="column-filter-input" data-filter-column="${escapeHtml(header)}" data-filter-menu="${escapeHtml(datalistId)}" value="${escapeHtml(filterText(state.logColumnFilters[header]))}" placeholder="Filter" autocomplete="off" />
           <button class="filter-menu-button" type="button" data-filter-menu-toggle="${escapeHtml(datalistId)}" aria-label="Show ${escapeHtml(header)} filter options">▾</button>
           <div class="column-filter-menu" id="${escapeHtml(datalistId)}" hidden>
-            ${options.map((value) => `<button type="button" data-filter-option="${escapeHtml(header)}" data-filter-value="${escapeHtml(value)}">${escapeHtml(value)}</button>`).join("") || `<span>No values yet</span>`}
+            ${selectedOptions.length ? `<button class="filter-clear-button" type="button" data-filter-clear="${escapeHtml(header)}">Clear selected (${selectedOptions.length})</button>` : ""}
+            ${options.map((value) => `
+              <label class="column-filter-option">
+                <input type="checkbox" data-filter-option="${escapeHtml(header)}" data-filter-value="${escapeHtml(value)}" ${selectedOptions.includes(value) ? "checked" : ""} />
+                <span>${escapeHtml(value)}</span>
+              </label>
+            `).join("") || `<span>No values yet</span>`}
           </div>
         </div>
       `
       : `
-        <input class="column-filter-input" data-filter-column="${escapeHtml(header)}" value="${escapeHtml(state.logColumnFilters[header] || "")}" placeholder="Filter" />
+        <input class="column-filter-input" data-filter-column="${escapeHtml(header)}" value="${escapeHtml(filterText(state.logColumnFilters[header]))}" placeholder="Filter" />
       `;
     if (header === FIELD.required) {
       filterControl = `
         <select class="column-filter-input" data-filter-column="${escapeHtml(header)}">
-          ${requiredDateRangeOptions().map(([value, label]) => `<option value="${escapeHtml(value)}" ${state.logColumnFilters[header] === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
+          ${requiredDateRangeOptions().map(([value, label]) => `<option value="${escapeHtml(value)}" ${filterText(state.logColumnFilters[header]) === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}
         </select>
       `;
     }
     if (header === FIELD.critical) {
       filterControl = `
         <select class="column-filter-input" data-filter-column="${escapeHtml(header)}">
-          <option value="" ${state.logColumnFilters[header] ? "" : "selected"}>All items</option>
-          <option value="true" ${state.logColumnFilters[header] === "true" ? "selected" : ""}>Critical only</option>
-          <option value="false" ${state.logColumnFilters[header] === "false" ? "selected" : ""}>Not critical</option>
+          <option value="" ${filterText(state.logColumnFilters[header]) ? "" : "selected"}>All items</option>
+          <option value="true" ${filterText(state.logColumnFilters[header]) === "true" ? "selected" : ""}>Critical only</option>
+          <option value="false" ${filterText(state.logColumnFilters[header]) === "false" ? "selected" : ""}>Not critical</option>
         </select>
       `;
     }
@@ -1718,11 +1766,13 @@ function renderLogHead() {
   });
 
   els.logHead.querySelectorAll("[data-filter-column]").forEach((input) => {
-    input.addEventListener("input", () => {
-      state.logColumnFilters[input.dataset.filterColumn] = input.value;
+    const updateFilter = () => {
+      setLogFilterText(input.dataset.filterColumn, input.value);
       saveLogControls();
       renderLogBody();
-    });
+    };
+    input.addEventListener("input", updateFilter);
+    input.addEventListener("change", updateFilter);
     input.addEventListener("focus", () => {
       if (input.dataset.filterMenu) openColumnFilterMenu(input.dataset.filterMenu);
     });
@@ -1738,16 +1788,22 @@ function renderLogHead() {
   });
 
   els.logHead.querySelectorAll("[data-filter-option]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const header = button.dataset.filterOption;
-      const input = [...els.logHead.querySelectorAll("[data-filter-column]")]
-        .find((control) => control.dataset.filterColumn === header);
-      if (!input) return;
-      input.value = button.dataset.filterValue;
-      state.logColumnFilters[header] = input.value;
+    button.addEventListener("change", () => {
+      toggleLogFilterSelection(button.dataset.filterOption, button.dataset.filterValue);
       saveLogControls();
-      closeColumnFilterMenus();
+      renderLogHead();
       renderLogBody();
+      openColumnFilterMenu(listIdForColumn(button.dataset.filterOption));
+    });
+  });
+
+  els.logHead.querySelectorAll("[data-filter-clear]").forEach((button) => {
+    button.addEventListener("click", () => {
+      clearLogFilterSelections(button.dataset.filterClear);
+      saveLogControls();
+      renderLogHead();
+      renderLogBody();
+      openColumnFilterMenu(listIdForColumn(button.dataset.filterClear));
     });
   });
 }
