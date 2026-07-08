@@ -3,6 +3,9 @@ const DATA_URL = "./workbook-data.json";
 const FIELD = {
   drawing: "DRAWING #",
   tag: "TAG #",
+  category: "CATEGORY",
+  type: "TYPE",
+  endConnection: "END CONNECTION",
   item: "ITEM DESCRIPTION",
   quantity: "QUANTITY",
   units: "UNITS",
@@ -60,6 +63,9 @@ const state = {
 const VALID_VIEWS = new Set(["dashboard", "log", "procurement", "development", "admin"]);
 const AUTOCOMPLETE_FILTERS = new Set([
   FIELD.drawing,
+  FIELD.category,
+  FIELD.type,
+  FIELD.endConnection,
   FIELD.spec,
   FIELD.provider,
   FIELD.area,
@@ -1316,6 +1322,9 @@ function matchesFilters(row) {
   const searchable = normalizeKey([
     row[FIELD.drawing],
     row[FIELD.tag],
+    row[FIELD.category],
+    row[FIELD.type],
+    row[FIELD.endConnection],
     row[FIELD.item],
     row[FIELD.quantity],
     row[FIELD.units],
@@ -1551,7 +1560,7 @@ function dateConflict(row, header) {
 }
 
 function logHeaders() {
-  return [FIELD.drawing, FIELD.tag, FIELD.item, FIELD.quantity, FIELD.units, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.submittal, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
+  return [FIELD.drawing, FIELD.tag, FIELD.category, FIELD.type, FIELD.endConnection, FIELD.item, FIELD.quantity, FIELD.units, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.submittal, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
 }
 
 function columnOptions(header) {
@@ -2134,7 +2143,7 @@ function bindRemoveButtons() {
 }
 
 function allTableHeaders() {
-  return [FIELD.drawing, FIELD.tag, FIELD.item, FIELD.quantity, FIELD.units, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.submittal, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
+  return [FIELD.drawing, FIELD.tag, FIELD.category, FIELD.type, FIELD.endConnection, FIELD.item, FIELD.quantity, FIELD.units, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.submittal, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
 }
 
 function saveColumnPrefs() {
