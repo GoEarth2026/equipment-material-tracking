@@ -38,6 +38,10 @@ select {
   min-height: 100vh;
 }
 
+.app-shell.is-sidebar-hidden {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .delivery-dialog {
   width: min(760px, calc(100vw - 32px));
   border: 0;
@@ -114,6 +118,10 @@ select {
   display: flex;
   flex-direction: column;
   gap: 22px;
+}
+
+.app-shell.is-sidebar-hidden .sidebar {
+  display: none;
 }
 
 .brand {
@@ -250,6 +258,10 @@ p {
   display: flex;
   align-items: end;
   gap: 10px;
+}
+
+.sidebar-toggle {
+  flex: 0 0 auto;
 }
 
 .search,

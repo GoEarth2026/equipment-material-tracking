@@ -4,10 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Equipment &amp; Material Tracking</title>
-    <link rel="stylesheet" href="./styles.css?v=print-log1" />
+    <link rel="stylesheet" href="./styles.css?v=sidebar-toggle1" />
   </head>
   <body>
-    <div class="app-shell">
+    <div class="app-shell" id="appShell">
       <aside class="sidebar" aria-label="App navigation">
         <div class="brand">
           <div class="brand-mark">EM</div>
@@ -44,6 +44,7 @@
             <p class="sync-status" id="syncStatus">Local mode</p>
           </div>
           <div class="top-actions">
+            <button class="ghost-button sidebar-toggle" id="sidebarToggleButton" type="button" aria-expanded="true">Hide Menu</button>
             <label class="search">
               <span>Project</span>
               <select id="projectSelect"></select>
@@ -251,6 +252,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="./supabase-config.js"></script>
-    <script src="./app.js?v=print-log1"></script>
+    <script src="./app.js?v=sidebar-toggle1"></script>
   </body>
 </html>

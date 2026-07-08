@@ -87,8 +87,11 @@ const PROJECTS_PREF_KEY = "equipmentMaterialProjects";
 const ACTIVE_PROJECT_PREF_KEY = "equipmentMaterialActiveProject";
 const PROJECT_ROWS_PREFIX = "equipmentMaterialProjectRows:";
 const DEVELOPMENT_NOTES_PREF_KEY = "equipmentMaterialDevelopmentNotes";
+const SIDEBAR_PREF_KEY = "equipmentMaterialSidebarHidden";
 
 const els = {
+  appShell: document.querySelector("#appShell"),
+  sidebarToggle: document.querySelector("#sidebarToggleButton"),
   viewTitle: document.querySelector("#view-title"),
   syncStatus: document.querySelector("#syncStatus"),
   projectSelect: document.querySelector("#projectSelect"),
@@ -2519,6 +2522,14 @@ function render() {
   renderAdmin();
 }
 
+function setSidebarHidden(hidden) {
+  els.appShell.classList.toggle("is-sidebar-hidden", hidden);
+  els.sidebarToggle.textContent = hidden ? "Show Menu" : "Hide Menu";
+  els.sidebarToggle.setAttribute("aria-expanded", String(!hidden));
+  localStorage.setItem(SIDEBAR_PREF_KEY, hidden ? "true" : "false");
+  requestAnimationFrame(syncTopScrollbarWidth);
+}
+
 function setView(view) {
   if (!VALID_VIEWS.has(view)) view = "dashboard";
   state.activeView = view;
@@ -2552,6 +2563,7 @@ function setView(view) {
 }
 
 async function init() {
+  setSidebarHidden(localStorage.getItem(SIDEBAR_PREF_KEY) === "true");
   state.data = await fetch(DATA_URL).then((response) => response.json());
   state.baseRows = state.data.sheets[0].rows.map((row) => ({ ...row }));
   loadProjects();
@@ -2616,6 +2628,10 @@ async function init() {
     state.logSort = { column: null, direction: "asc" };
     saveLogControls();
     applyFilters();
+  });
+
+  els.sidebarToggle.addEventListener("click", () => {
+    setSidebarHidden(!els.appShell.classList.contains("is-sidebar-hidden"));
   });
 
   els.columnToggle.addEventListener("click", () => {
