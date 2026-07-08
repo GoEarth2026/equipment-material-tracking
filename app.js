@@ -10,7 +10,8 @@ const FIELD = {
   spec: "SPECIFICATION SECTION",
   provider: "PROVIDED BY:",
   area: "AREA / BUILDING",
-  room: "ROOM / SYSTEM",
+  room: "ROOM",
+  system: "SYSTEM",
   submittal: "SUBMITTAL #",
   status: "SUBMITTAL STATUS",
   released: "DATE RELEASED",
@@ -24,6 +25,8 @@ const FIELD = {
   remaining: "DAYS REMAININIG",
   notes: "NOTES",
 };
+
+const LEGACY_ROOM_SYSTEM_FIELD = "ROOM / SYSTEM";
 
 const state = {
   data: null,
@@ -55,7 +58,7 @@ const state = {
 };
 
 const VALID_VIEWS = new Set(["dashboard", "log", "procurement", "development", "admin"]);
-const AUTOCOMPLETE_FILTERS = new Set([FIELD.provider, FIELD.area, FIELD.room, FIELD.status]);
+const AUTOCOMPLETE_FILTERS = new Set([FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.status]);
 const COLUMN_PREF_KEY = "equipmentMaterialHiddenColumns";
 const LOG_FILTER_PREF_KEY = "equipmentMaterialLogColumnFilters";
 const LOG_SORT_PREF_KEY = "equipmentMaterialLogSort";
@@ -870,6 +873,7 @@ function exportValue(row, header) {
   if ([FIELD.critical, FIELD.delivered].includes(header)) return row[header] ? "Yes" : "No";
   if (header === FIELD.notes) return notesForExport(row[FIELD.notes]);
   if ([FIELD.released, FIELD.delivery, FIELD.required].includes(header)) return excelDate(row[header]) || "";
+  if (header === FIELD.system) return displayValue(row, header);
   return row[header] ?? "";
 }
 
@@ -1312,6 +1316,7 @@ function matchesFilters(row) {
     row[FIELD.provider],
     row[FIELD.area],
     row[FIELD.room],
+    displayValue(row, FIELD.system),
     row[FIELD.submittal],
     row[FIELD.status],
     row[FIELD.notes],
@@ -1509,6 +1514,7 @@ function renderTable(head, body, rows, headers, raw = false) {
 }
 
 function displayValue(row, header) {
+  if (header === FIELD.system) return row[FIELD.system] ?? row[LEGACY_ROOM_SYSTEM_FIELD] ?? "";
   const value = row[header];
   if (header === FIELD.qtyDelivered) return quantityDelivered(row);
   if (header === FIELD.deliveries) return deliveriesForExport(row);
@@ -1536,13 +1542,13 @@ function dateConflict(row, header) {
 }
 
 function logHeaders() {
-  return [FIELD.drawing, FIELD.tag, FIELD.item, FIELD.quantity, FIELD.units, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.submittal, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
+  return [FIELD.drawing, FIELD.tag, FIELD.item, FIELD.quantity, FIELD.units, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.submittal, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
 }
 
 function columnOptions(header) {
   if (header === FIELD.provider) return state.adminLists.suppliers;
   if (header === FIELD.status) return state.adminLists.statuses;
-  return [...new Set(state.rows.map((row) => clean(row[header])).filter(Boolean))]
+  return [...new Set(state.rows.map((row) => clean(displayValue(row, header))).filter(Boolean))]
     .sort((a, b) => a.localeCompare(b));
 }
 
@@ -2119,7 +2125,7 @@ function bindRemoveButtons() {
 }
 
 function allTableHeaders() {
-  return [FIELD.drawing, FIELD.tag, FIELD.item, FIELD.quantity, FIELD.units, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.submittal, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
+  return [FIELD.drawing, FIELD.tag, FIELD.item, FIELD.quantity, FIELD.units, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.submittal, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
 }
 
 function saveColumnPrefs() {
