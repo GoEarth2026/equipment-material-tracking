@@ -41,6 +41,8 @@ const state = {
   activeProjectId: "hampton-wwtp-phase-ii",
   activeView: "dashboard",
   hiddenColumns: new Set(),
+  columnOrder: [],
+  columnWidths: {},
   logColumnFilters: {},
   logSort: { column: null, direction: "asc" },
   deletedRowKeys: new Set(),
@@ -61,6 +63,10 @@ const state = {
 };
 
 const VALID_VIEWS = new Set(["dashboard", "log", "procurement", "development", "admin"]);
+const ACTION_COLUMN_WIDTH = 82;
+const DEFAULT_COLUMN_WIDTH = 150;
+const MIN_COLUMN_WIDTH = 80;
+const MAX_COLUMN_WIDTH = 520;
 const AUTOCOMPLETE_FILTERS = new Set([
   FIELD.drawing,
   FIELD.category,
@@ -75,6 +81,8 @@ const AUTOCOMPLETE_FILTERS = new Set([
   FIELD.status,
 ]);
 const COLUMN_PREF_KEY = "equipmentMaterialHiddenColumns";
+const COLUMN_ORDER_PREF_KEY = "equipmentMaterialColumnOrder";
+const COLUMN_WIDTH_PREF_KEY = "equipmentMaterialColumnWidths";
 const LOG_FILTER_PREF_KEY = "equipmentMaterialLogColumnFilters";
 const LOG_SORT_PREF_KEY = "equipmentMaterialLogSort";
 const EDIT_PREF_KEY = "equipmentMaterialLogEdits";
@@ -1419,6 +1427,10 @@ function escapeHtml(value) {
   }[char]));
 }
 
+function escapeCssIdentifier(value) {
+  return window.CSS?.escape ? CSS.escape(value) : String(value).replace(/["\\]/g, "\\$&");
+}
+
 function matchesFilters(row) {
   const term = normalizeKey(els.search.value);
   const searchable = normalizeKey([
@@ -1665,6 +1677,12 @@ function logHeaders() {
   return [FIELD.drawing, FIELD.tag, FIELD.category, FIELD.type, FIELD.endConnection, FIELD.item, FIELD.quantity, FIELD.units, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.submittal, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
 }
 
+function orderedLogHeaders() {
+  const defaults = logHeaders();
+  const ordered = state.columnOrder.filter((header) => defaults.includes(header));
+  return [...ordered, ...defaults.filter((header) => !ordered.includes(header))];
+}
+
 function columnOptions(header) {
   if (header === FIELD.provider) return state.adminLists.suppliers;
   if (header === FIELD.status) return state.adminLists.statuses;
@@ -1677,7 +1695,20 @@ function listIdForColumn(header) {
 }
 
 function visibleLogHeaders() {
-  return logHeaders().filter((header) => !state.hiddenColumns.has(header));
+  return orderedLogHeaders().filter((header) => !state.hiddenColumns.has(header));
+}
+
+function columnWidth(header) {
+  const value = Number(state.columnWidths[header]);
+  return Number.isFinite(value) ? Math.min(Math.max(value, MIN_COLUMN_WIDTH), MAX_COLUMN_WIDTH) : DEFAULT_COLUMN_WIDTH;
+}
+
+function tableWidth(headers = visibleLogHeaders()) {
+  return ACTION_COLUMN_WIDTH + headers.reduce((total, header) => total + columnWidth(header), 0);
+}
+
+function columnStyle(header) {
+  return `width: ${columnWidth(header)}px; min-width: ${columnWidth(header)}px; max-width: ${columnWidth(header)}px;`;
 }
 
 function filterText(filter) {
@@ -1790,10 +1821,106 @@ function openColumnFilterMenu(menuId) {
   menu.hidden = false;
 }
 
+function saveColumnLayoutPrefs() {
+  localStorage.setItem(COLUMN_ORDER_PREF_KEY, JSON.stringify(orderedLogHeaders()));
+  localStorage.setItem(COLUMN_WIDTH_PREF_KEY, JSON.stringify(state.columnWidths));
+}
+
+function moveColumn(sourceHeader, targetHeader) {
+  if (!sourceHeader || !targetHeader || sourceHeader === targetHeader) return;
+  const headers = orderedLogHeaders();
+  const sourceIndex = headers.indexOf(sourceHeader);
+  const targetIndex = headers.indexOf(targetHeader);
+  if (sourceIndex === -1 || targetIndex === -1) return;
+  headers.splice(sourceIndex, 1);
+  headers.splice(targetIndex, 0, sourceHeader);
+  state.columnOrder = headers;
+  saveColumnLayoutPrefs();
+  renderLog();
+  renderColumnMenu();
+}
+
+function bindColumnDragAndResize() {
+  let resizing = null;
+
+  const finishResize = () => {
+    if (!resizing) return;
+    saveColumnLayoutPrefs();
+    resizing = null;
+    document.body.classList.remove("is-resizing-column");
+    document.removeEventListener("pointermove", handleResizeMove);
+    document.removeEventListener("pointerup", finishResize);
+    syncTopScrollbarWidth();
+  };
+
+  function handleResizeMove(event) {
+    if (!resizing) return;
+    const width = Math.min(Math.max(resizing.startWidth + event.clientX - resizing.startX, MIN_COLUMN_WIDTH), MAX_COLUMN_WIDTH);
+    state.columnWidths[resizing.header] = width;
+    els.logHead.querySelectorAll(`[data-header-column="${escapeCssIdentifier(resizing.header)}"]`).forEach((cell) => {
+      cell.style.width = `${width}px`;
+      cell.style.minWidth = `${width}px`;
+      cell.style.maxWidth = `${width}px`;
+    });
+    els.logBody.querySelectorAll(`[data-cell-column="${escapeCssIdentifier(resizing.header)}"]`).forEach((cell) => {
+      cell.style.width = `${width}px`;
+      cell.style.minWidth = `${width}px`;
+      cell.style.maxWidth = `${width}px`;
+    });
+    const table = els.tableShell?.querySelector("table");
+    if (table) table.style.width = `${tableWidth()}px`;
+    syncTopScrollbarWidth();
+  }
+
+  els.logHead.querySelectorAll("[data-resize-column]").forEach((handle) => {
+    handle.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      resizing = {
+        header: handle.dataset.resizeColumn,
+        startX: event.clientX,
+        startWidth: columnWidth(handle.dataset.resizeColumn),
+      };
+      document.body.classList.add("is-resizing-column");
+      document.addEventListener("pointermove", handleResizeMove);
+      document.addEventListener("pointerup", finishResize);
+    });
+  });
+
+  els.logHead.querySelectorAll("[data-header-column]").forEach((headerCell) => {
+    headerCell.addEventListener("dragstart", (event) => {
+      if (event.target.closest(".column-resize-handle, input, button, select, label, .column-filter-menu")) {
+        event.preventDefault();
+        return;
+      }
+      headerCell.classList.add("is-dragging");
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", headerCell.dataset.headerColumn);
+    });
+    headerCell.addEventListener("dragend", () => {
+      headerCell.classList.remove("is-dragging");
+      els.logHead.querySelectorAll(".is-drop-target").forEach((cell) => cell.classList.remove("is-drop-target"));
+    });
+    headerCell.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      headerCell.classList.add("is-drop-target");
+      event.dataTransfer.dropEffect = "move";
+    });
+    headerCell.addEventListener("dragleave", () => {
+      headerCell.classList.remove("is-drop-target");
+    });
+    headerCell.addEventListener("drop", (event) => {
+      event.preventDefault();
+      headerCell.classList.remove("is-drop-target");
+      moveColumn(event.dataTransfer.getData("text/plain"), headerCell.dataset.headerColumn);
+    });
+  });
+}
+
 function renderLogHead() {
   const headers = visibleLogHeaders();
   els.logHead.innerHTML = `
-    <th>
+    <th class="action-header" style="width: ${ACTION_COLUMN_WIDTH}px; min-width: ${ACTION_COLUMN_WIDTH}px; max-width: ${ACTION_COLUMN_WIDTH}px;">
       <div class="th-control">
         <span>Actions</span>
       </div>
@@ -1841,14 +1968,16 @@ function renderLogHead() {
       `;
     }
     return `
-      <th>
+      <th class="resizable-header" draggable="true" data-header-column="${escapeHtml(header)}" style="${columnStyle(header)}">
         <div class="th-control">
+          <span class="column-drag-handle" title="Drag to move column" aria-hidden="true">::</span>
           <button class="sort-button" type="button" data-sort-column="${escapeHtml(header)}">
             <span>${escapeHtml(header)}</span>
             <span class="sort-indicator">${indicator}</span>
           </button>
           ${filterControl}
         </div>
+        <span class="column-resize-handle" data-resize-column="${escapeHtml(header)}" aria-hidden="true"></span>
       </th>
     `;
   }).join("")}
@@ -1908,6 +2037,8 @@ function renderLogHead() {
       openColumnFilterMenu(listIdForColumn(button.dataset.filterClear));
     });
   });
+
+  bindColumnDragAndResize();
 }
 
 function tabbableLogHeaders() {
@@ -2205,11 +2336,11 @@ function bindNoteButtons() {
   });
 }
 
-function renderNotesCell(row) {
+function renderNotesCell(row, header = FIELD.notes) {
   const notes = parseNotes(row[FIELD.notes]);
   const key = rowKey(row);
   return `
-    <td class="notes-cell">
+    <td class="notes-cell" data-cell-column="${escapeHtml(header)}" style="${columnStyle(header)}">
       <div class="note-timeline">
         ${notes.map((note, index) => `
           <div class="note-entry">
@@ -2227,7 +2358,7 @@ function renderNotesCell(row) {
   `;
 }
 
-function renderDeliveriesCell(row) {
+function renderDeliveriesCell(row, header = FIELD.deliveries) {
   const deliveries = rowDeliveries(row);
   const key = rowKey(row);
   const deliveredQuantity = quantityDelivered(row);
@@ -2238,7 +2369,7 @@ function renderDeliveriesCell(row) {
     : `${deliveredQuantity}${units ? ` ${units}` : ""} of ${requiredQuantity} delivered`;
 
   return `
-    <td class="deliveries-cell">
+    <td class="deliveries-cell" data-cell-column="${escapeHtml(header)}" style="${columnStyle(header)}">
       <div class="delivery-tracker">
         <strong>${escapeHtml(summary)}</strong>
         <div class="delivery-list">
@@ -2275,7 +2406,7 @@ function renderLogBody() {
   const rows = getLogRows();
   els.logBody.innerHTML = rows.map((row) => `
     <tr>
-      <td class="action-cell">
+      <td class="action-cell" style="width: ${ACTION_COLUMN_WIDTH}px; min-width: ${ACTION_COLUMN_WIDTH}px; max-width: ${ACTION_COLUMN_WIDTH}px;">
         <button class="icon-row-button remove-row-button" type="button" data-remove-row="${escapeHtml(rowKey(row))}" aria-label="Remove item" title="Remove item">×</button>
         <button class="icon-row-button insert-row-button" type="button" data-insert-row="${escapeHtml(rowKey(row))}" data-insert-position="below" aria-label="Insert row below" title="Insert row below">+</button>
       </td>
@@ -2286,7 +2417,7 @@ function renderLogBody() {
           const current = clean(display);
           const options = uniqueSorted([current, ...state.adminLists.statuses]);
           return `
-            <td>
+            <td data-cell-column="${escapeHtml(header)}" style="${columnStyle(header)}">
               <select class="cell-select" data-status-row="${escapeHtml(key)}" data-log-field-row="${escapeHtml(key)}" data-log-field-column="${escapeHtml(header)}">
                 <option value=""></option>
                 ${options.map((status) => `<option value="${escapeHtml(status)}" ${status === current ? "selected" : ""}>${escapeHtml(status)}</option>`).join("")}
@@ -2296,21 +2427,21 @@ function renderLogBody() {
         }
         if ([FIELD.critical, FIELD.delivered].includes(header)) {
           return `
-            <td class="checkbox-cell">
+            <td class="checkbox-cell" data-cell-column="${escapeHtml(header)}" style="${columnStyle(header)}">
               <input type="checkbox" data-checkbox-row="${escapeHtml(key)}" data-checkbox-column="${escapeHtml(header)}" data-log-field-row="${escapeHtml(key)}" data-log-field-column="${escapeHtml(header)}" ${row[header] ? "checked" : ""} aria-label="${escapeHtml(header)}" />
             </td>
           `;
         }
         if (header === FIELD.qtyDelivered) {
-          return `<td class="calculated-cell">${escapeHtml(display)}</td>`;
+          return `<td class="calculated-cell" data-cell-column="${escapeHtml(header)}" style="${columnStyle(header)}">${escapeHtml(display)}</td>`;
         }
         if (header === FIELD.deliveries) {
-          return renderDeliveriesCell(row);
+          return renderDeliveriesCell(row, header);
         }
         if (header === FIELD.notes) {
-          return renderNotesCell(row);
+          return renderNotesCell(row, header);
         }
-        return `<td class="editable-cell ${dateConflict(row, header) ? "date-conflict" : ""}" contenteditable="true" tabindex="0" data-edit-row="${escapeHtml(key)}" data-edit-column="${escapeHtml(header)}" data-log-field-row="${escapeHtml(key)}" data-log-field-column="${escapeHtml(header)}">${escapeHtml(editableValue(row, header))}</td>`;
+        return `<td class="editable-cell ${dateConflict(row, header) ? "date-conflict" : ""}" contenteditable="true" tabindex="0" data-cell-column="${escapeHtml(header)}" style="${columnStyle(header)}" data-edit-row="${escapeHtml(key)}" data-edit-column="${escapeHtml(header)}" data-log-field-row="${escapeHtml(key)}" data-log-field-column="${escapeHtml(header)}">${escapeHtml(editableValue(row, header))}</td>`;
       }).join("")}
     </tr>
   `).join("");
@@ -2347,12 +2478,22 @@ function saveColumnPrefs() {
   localStorage.setItem(COLUMN_PREF_KEY, JSON.stringify([...state.hiddenColumns]));
 }
 
+function resetColumnLayout() {
+  state.columnOrder = [];
+  state.columnWidths = {};
+  localStorage.removeItem(COLUMN_ORDER_PREF_KEY);
+  localStorage.removeItem(COLUMN_WIDTH_PREF_KEY);
+  renderColumnMenu();
+  renderLog();
+}
+
 function renderColumnMenu() {
-  const headers = allTableHeaders();
+  const headers = orderedLogHeaders();
   els.columnMenu.innerHTML = `
     <header>
       <span>Visible Columns</span>
       <button id="showAllColumns" type="button">Show all</button>
+      <button id="resetColumnLayout" type="button">Reset layout</button>
     </header>
     ${headers.map((header) => `
       <label class="column-option">
@@ -2380,9 +2521,13 @@ function renderColumnMenu() {
     renderColumnMenu();
     render();
   });
+
+  els.columnMenu.querySelector("#resetColumnLayout").addEventListener("click", resetColumnLayout);
 }
 
 function renderLog() {
+  const table = els.tableShell?.querySelector("table");
+  if (table) table.style.width = `${tableWidth()}px`;
   renderLogHead();
   renderLogBody();
 }
@@ -2592,6 +2737,22 @@ async function init() {
     state.hiddenColumns = new Set(savedHiddenColumns.filter((header) => allTableHeaders().includes(header)));
   } catch {
     state.hiddenColumns = new Set();
+  }
+  try {
+    const savedOrder = JSON.parse(localStorage.getItem(COLUMN_ORDER_PREF_KEY) || "[]");
+    state.columnOrder = Array.isArray(savedOrder) ? savedOrder.filter((header) => logHeaders().includes(header)) : [];
+  } catch {
+    state.columnOrder = [];
+  }
+  try {
+    const savedWidths = JSON.parse(localStorage.getItem(COLUMN_WIDTH_PREF_KEY) || "{}");
+    state.columnWidths = Object.fromEntries(
+      Object.entries(savedWidths)
+        .filter(([header, width]) => logHeaders().includes(header) && Number.isFinite(Number(width)))
+        .map(([header, width]) => [header, Math.min(Math.max(Number(width), MIN_COLUMN_WIDTH), MAX_COLUMN_WIDTH)]),
+    );
+  } catch {
+    state.columnWidths = {};
   }
   try {
     const savedColumnFilters = JSON.parse(localStorage.getItem(LOG_FILTER_PREF_KEY) || "{}");

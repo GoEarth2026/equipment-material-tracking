@@ -331,6 +331,7 @@ select {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 4px 4px 10px;
   color: var(--muted);
@@ -346,6 +347,7 @@ select {
   cursor: pointer;
   font-size: 12px;
   font-weight: 800;
+  white-space: nowrap;
 }
 
 .column-option {
@@ -700,6 +702,7 @@ table {
   width: 100%;
   border-collapse: collapse;
   min-width: 1180px;
+  table-layout: fixed;
 }
 
 th,
@@ -709,6 +712,66 @@ td {
   text-align: left;
   vertical-align: top;
   font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+th {
+  position: relative;
+}
+
+.resizable-header {
+  cursor: grab;
+  user-select: none;
+}
+
+.resizable-header.is-dragging {
+  opacity: 0.55;
+}
+
+.resizable-header.is-drop-target {
+  box-shadow: inset 3px 0 0 var(--accent-2);
+}
+
+.column-drag-handle {
+  align-self: start;
+  color: var(--muted);
+  cursor: grab;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1;
+  padding-top: 2px;
+  grid-row: 1 / span 2;
+}
+
+.column-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 2;
+}
+
+.column-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 3px;
+  width: 1px;
+  background: #c4cec9;
+}
+
+.column-resize-handle:hover::after {
+  background: var(--accent-2);
+  width: 2px;
+}
+
+body.is-resizing-column {
+  cursor: col-resize;
+  user-select: none;
 }
 
 td.date-conflict {
@@ -918,7 +981,17 @@ th {
 .th-control {
   display: grid;
   gap: 6px;
-  min-width: 130px;
+  min-width: 0;
+}
+
+.resizable-header .th-control {
+  grid-template-columns: 16px minmax(0, 1fr);
+}
+
+.resizable-header .sort-button,
+.resizable-header .column-filter-combo,
+.resizable-header .column-filter-input {
+  grid-column: 2;
 }
 
 .sort-button {
