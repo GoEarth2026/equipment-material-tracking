@@ -100,6 +100,7 @@ const els = {
   reset: document.querySelector("#resetFilters"),
   addItem: document.querySelector("#addItemButton"),
   exportExcel: document.querySelector("#exportExcelButton"),
+  printLog: document.querySelector("#printLogButton"),
   columnToggle: document.querySelector("#columnToggle"),
   columnMenu: document.querySelector("#columnMenu"),
   projectDashboard: document.querySelector("#projectDashboard"),
@@ -959,6 +960,104 @@ function exportMaterialLog() {
   const xml = buildExcelXml(project?.name || "Material Log", worksheetRows);
   const dateStamp = new Date().toISOString().slice(0, 10);
   downloadTextFile(xml, `${safeFileName(project?.name)}-material-log-${dateStamp}.xls`, "application/vnd.ms-excel;charset=utf-8");
+}
+
+function selectedOptionLabel(select) {
+  return clean(select.options[select.selectedIndex]?.textContent);
+}
+
+function requiredDateRangeLabel(value) {
+  return requiredDateRangeOptions().find(([range]) => range === value)?.[1] || value;
+}
+
+function printFilterSummary() {
+  const summary = [];
+  if (clean(els.search.value)) summary.push(`Search: ${clean(els.search.value)}`);
+  if (els.status.value !== "all") summary.push(`Status: ${selectedOptionLabel(els.status)}`);
+  if (els.area.value !== "all") summary.push(`Area / Building: ${selectedOptionLabel(els.area)}`);
+  if (els.provider.value !== "all") summary.push(`Provider: ${selectedOptionLabel(els.provider)}`);
+  if (els.timing.value !== "all") summary.push(`Timing: ${selectedOptionLabel(els.timing)}`);
+
+  Object.entries(state.logColumnFilters).forEach(([header, filter]) => {
+    if (!hasLogFilter(filter)) return;
+    const parts = [];
+    const text = filterText(filter);
+    const selected = filterSelections(filter);
+    if (text) parts.push(header === FIELD.required ? requiredDateRangeLabel(text) : text);
+    if (selected.length) parts.push(selected.join(", "));
+    summary.push(`${header}: ${parts.join("; ")}`);
+  });
+
+  if (state.logSort.column) {
+    summary.push(`Sorted by ${state.logSort.column} ${state.logSort.direction.toUpperCase()}`);
+  }
+  return summary;
+}
+
+function printMaterialLog() {
+  closeColumnFilterMenus();
+  const project = activeProject();
+  const headers = visibleLogHeaders();
+  const rows = getLogRows();
+  const generatedAt = new Date().toLocaleString();
+  const filterSummary = printFilterSummary();
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) {
+    window.print();
+    return;
+  }
+
+  const tableRows = rows.map((row) => `
+    <tr>
+      ${headers.map((header) => `<td>${escapeHtml(exportValue(row, header))}</td>`).join("")}
+    </tr>
+  `).join("");
+
+  printWindow.document.open();
+  printWindow.document.write(`<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>${escapeHtml(project?.name || "Material Log")}</title>
+    <style>
+      @page { size: landscape; margin: 0.35in; }
+      * { box-sizing: border-box; }
+      body { margin: 0; color: #15221d; font-family: Arial, sans-serif; font-size: 9px; }
+      header { margin-bottom: 12px; }
+      h1 { margin: 0 0 4px; font-size: 18px; }
+      .meta { color: #52635d; font-size: 10px; margin-bottom: 6px; }
+      .filters { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
+      .filter { border: 1px solid #c4cec9; border-radius: 4px; padding: 3px 5px; }
+      table { width: 100%; border-collapse: collapse; table-layout: auto; }
+      th, td { border: 1px solid #9eadab; padding: 4px 5px; text-align: left; vertical-align: top; white-space: pre-wrap; overflow-wrap: anywhere; }
+      th { background: #edf2ef; font-size: 8px; text-transform: uppercase; }
+      tbody tr:nth-child(even) td { background: #f8faf8; }
+      .empty { border: 1px solid #c4cec9; padding: 12px; color: #52635d; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>${escapeHtml(project?.name || "Material Log")}</h1>
+      <div class="meta">Material Log - ${rows.length} item${rows.length === 1 ? "" : "s"} - Printed ${escapeHtml(generatedAt)}</div>
+      ${filterSummary.length ? `<div class="filters">${filterSummary.map((item) => `<span class="filter">${escapeHtml(item)}</span>`).join("")}</div>` : ""}
+    </header>
+    ${rows.length ? `
+      <table>
+        <thead>
+          <tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr>
+        </thead>
+        <tbody>${tableRows}</tbody>
+      </table>
+    ` : `<div class="empty">No material log items match the current filters.</div>`}
+    <script>
+      window.addEventListener("load", () => {
+        window.focus();
+        window.print();
+      });
+    <\/script>
+  </body>
+</html>`);
+  printWindow.document.close();
 }
 
 function parseDelimited(text, delimiter) {
@@ -2527,6 +2626,8 @@ async function init() {
   els.addItem.addEventListener("click", addItem);
 
   els.exportExcel.addEventListener("click", exportMaterialLog);
+
+  els.printLog.addEventListener("click", printMaterialLog);
 
   els.downloadTemplate.addEventListener("click", downloadImportTemplate);
 

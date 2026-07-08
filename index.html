@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Equipment &amp; Material Tracking</title>
-    <link rel="stylesheet" href="./styles.css?v=multi-filter1" />
+    <link rel="stylesheet" href="./styles.css?v=print-log1" />
   </head>
   <body>
     <div class="app-shell">
@@ -84,6 +84,7 @@
         <section class="column-controls" aria-label="Column controls">
           <button class="ghost-button" id="addItemButton" type="button">Add Item</button>
           <button class="ghost-button" id="exportExcelButton" type="button">Export Excel</button>
+          <button class="ghost-button" id="printLogButton" type="button">Print Log</button>
           <button class="ghost-button" id="columnToggle" type="button" aria-expanded="false">Columns</button>
           <div class="column-menu" id="columnMenu" hidden></div>
         </section>
@@ -250,6 +251,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="./supabase-config.js"></script>
-    <script src="./app.js?v=multi-filter1"></script>
+    <script src="./app.js?v=print-log1"></script>
   </body>
 </html>
