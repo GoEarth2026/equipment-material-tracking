@@ -4,6 +4,7 @@ const FIELD = {
   tag: "TAG #",
   item: "ITEM DESCRIPTION",
   quantity: "QUANTITY",
+  units: "UNITS",
   qtyDelivered: "QTY. DELIVERED",
   spec: "SPECIFICATION SECTION",
   provider: "PROVIDED BY:",
@@ -1272,6 +1273,7 @@ function matchesFilters(row) {
     row[FIELD.tag],
     row[FIELD.item],
     row[FIELD.quantity],
+    row[FIELD.units],
     quantityDelivered(row),
     deliveriesForExport(row),
     row[FIELD.spec],
@@ -1501,7 +1503,7 @@ function dateConflict(row, header) {
 }
 
 function logHeaders() {
-  return [FIELD.tag, FIELD.item, FIELD.quantity, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
+  return [FIELD.tag, FIELD.item, FIELD.quantity, FIELD.units, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
 }
 
 function columnOptions(header) {
@@ -2015,7 +2017,7 @@ function bindRemoveButtons() {
 }
 
 function allTableHeaders() {
-  return [FIELD.tag, FIELD.item, FIELD.quantity, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
+  return [FIELD.tag, FIELD.item, FIELD.quantity, FIELD.units, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
 }
 
 function saveColumnPrefs() {
