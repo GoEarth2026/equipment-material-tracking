@@ -121,6 +121,7 @@ const els = {
   deliveryDialog: document.querySelector("#deliveryDialog"),
   deliveryForm: document.querySelector("#deliveryForm"),
   deliveryDialogTitle: document.querySelector("#deliveryDialogTitle"),
+  deliveryDialogItem: document.querySelector("#deliveryDialogItem"),
   deliveryDialogClose: document.querySelector("#deliveryDialogClose"),
   deliveryCancel: document.querySelector("#deliveryCancelButton"),
   deliveryDate: document.querySelector("#deliveryDateInput"),
@@ -1875,6 +1876,13 @@ function openDeliveryDialog(row, index = null) {
   const existing = index === null ? {} : deliveries[index] || {};
   state.deliveryEditor = { rowKey: rowKey(row), index };
   els.deliveryDialogTitle.textContent = index === null ? "Add Delivery" : "Edit Delivery";
+  const itemLabel = clean(row[FIELD.item]) || "No item description";
+  const itemContext = [
+    clean(row[FIELD.tag]) ? `Tag: ${clean(row[FIELD.tag])}` : "",
+    clean(row[FIELD.quantity]) ? `Qty: ${clean(row[FIELD.quantity])}` : "",
+    clean(row[FIELD.units]) ? `Units: ${clean(row[FIELD.units])}` : "",
+  ].filter(Boolean).join(" | ");
+  els.deliveryDialogItem.textContent = itemContext ? `${itemLabel} (${itemContext})` : itemLabel;
   els.deliveryDate.value = formattedDeliveryDate(existing) || "";
   els.deliveryTicket.value = clean(existing.ticketNumber);
   els.deliveryQty.value = clean(existing.qtyDelivered);
