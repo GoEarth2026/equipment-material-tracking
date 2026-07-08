@@ -1,6 +1,7 @@
 const DATA_URL = "./workbook-data.json";
 
 const FIELD = {
+  drawing: "DRAWING #",
   tag: "TAG #",
   item: "ITEM DESCRIPTION",
   quantity: "QUANTITY",
@@ -1299,6 +1300,7 @@ function escapeHtml(value) {
 function matchesFilters(row) {
   const term = normalizeKey(els.search.value);
   const searchable = normalizeKey([
+    row[FIELD.drawing],
     row[FIELD.tag],
     row[FIELD.item],
     row[FIELD.quantity],
@@ -1532,7 +1534,7 @@ function dateConflict(row, header) {
 }
 
 function logHeaders() {
-  return [FIELD.tag, FIELD.item, FIELD.quantity, FIELD.units, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
+  return [FIELD.drawing, FIELD.tag, FIELD.item, FIELD.quantity, FIELD.units, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
 }
 
 function columnOptions(header) {
@@ -2115,7 +2117,7 @@ function bindRemoveButtons() {
 }
 
 function allTableHeaders() {
-  return [FIELD.tag, FIELD.item, FIELD.quantity, FIELD.units, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
+  return [FIELD.drawing, FIELD.tag, FIELD.item, FIELD.quantity, FIELD.units, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
 }
 
 function saveColumnPrefs() {
