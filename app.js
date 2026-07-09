@@ -197,6 +197,30 @@ function rowKey(row) {
   return String(row._rowNumber || row[FIELD.tag] || state.rows.indexOf(row));
 }
 
+function mergeRowsPreservingMissingFields(currentRows = [], existingRows = []) {
+  const existingByKey = new Map(existingRows.map((row) => [rowKey(row), row]));
+  return currentRows.map((row) => {
+    const existing = existingByKey.get(rowKey(row));
+    return existing ? { ...existing, ...row } : row;
+  });
+}
+
+function mergeSharedState(currentState, existingState = {}) {
+  const existingRowsByProject = existingState.rowsByProject || {};
+  const mergedRowsByProject = {};
+  Object.entries(currentState.rowsByProject || {}).forEach(([projectId, rows]) => {
+    mergedRowsByProject[projectId] = mergeRowsPreservingMissingFields(rows, existingRowsByProject[projectId] || []);
+  });
+  Object.entries(existingRowsByProject).forEach(([projectId, rows]) => {
+    if (!mergedRowsByProject[projectId]) mergedRowsByProject[projectId] = rows;
+  });
+  return {
+    ...existingState,
+    ...currentState,
+    rowsByProject: mergedRowsByProject,
+  };
+}
+
 function isAddedRow(row) {
   return rowKey(row).startsWith("new-");
 }
@@ -336,10 +360,19 @@ function queueSharedSave() {
 async function saveSharedState() {
   if (!state.supabaseClient) return;
   try {
+    const currentState = collectSharedState();
+    const { data: existingData, error: readError } = await state.supabaseClient
+      .from("equipment_material_app_state")
+      .select("data")
+      .eq("id", "main")
+      .maybeSingle();
+    if (readError) throw readError;
+    const mergedState = existingData?.data ? mergeSharedState(currentState, existingData.data) : currentState;
     const { error } = await state.supabaseClient
       .from("equipment_material_app_state")
-      .upsert({ id: "main", data: collectSharedState() });
+      .upsert({ id: "main", data: mergedState });
     if (error) throw error;
+    state.rowsByProject = mergedState.rowsByProject || state.rowsByProject;
     setSyncStatus("Shared database saved", "cloud");
   } catch (error) {
     console.error(error);
@@ -620,6 +653,22 @@ function normalizeEditedValue(header, value) {
   }
   if ([FIELD.critical, FIELD.delivered].includes(header)) return Boolean(value);
   return text;
+}
+
+function shouldAutosaveTextInput(header) {
+  return ![
+    FIELD.quantity,
+    FIELD.qtyDelivered,
+    FIELD.released,
+    FIELD.lead,
+    FIELD.delivery,
+    FIELD.required,
+    FIELD.critical,
+    FIELD.delivered,
+    FIELD.deliveries,
+    FIELD.remaining,
+    FIELD.notes,
+  ].includes(header);
 }
 
 function rowDeliveries(row) {
@@ -2139,6 +2188,14 @@ function commitEditableCell(cell) {
 
 function bindEditableCells() {
   els.logBody.querySelectorAll("[data-edit-column]").forEach((cell) => {
+    cell.addEventListener("input", () => {
+      const header = cell.dataset.editColumn;
+      if (!shouldAutosaveTextInput(header)) return;
+      const row = state.rows.find((candidate) => rowKey(candidate) === cell.dataset.editRow);
+      if (!row) return;
+      saveCellEdit(row, header, normalizeEditedValue(header, cell.textContent));
+    });
+
     cell.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
@@ -2168,6 +2225,14 @@ function bindEditableCells() {
       commitEditableCell(cell);
     });
   });
+}
+
+function saveActiveEditableCell() {
+  const cell = document.activeElement?.matches?.("[data-edit-column]") ? document.activeElement : null;
+  if (!cell) return;
+  const row = state.rows.find((candidate) => rowKey(candidate) === cell.dataset.editRow);
+  if (!row) return;
+  saveCellEdit(row, cell.dataset.editColumn, normalizeEditedValue(cell.dataset.editColumn, cell.textContent));
 }
 
 function bindStatusSelects() {
@@ -2862,6 +2927,8 @@ async function init() {
       closeColumnFilterMenus();
     }
   });
+
+  window.addEventListener("beforeunload", saveActiveEditableCell);
 
   document.querySelectorAll(".nav-tab").forEach((button) => {
     button.addEventListener("click", () => setView(button.dataset.view));
