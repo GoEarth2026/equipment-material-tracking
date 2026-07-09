@@ -80,6 +80,13 @@ const AUTOCOMPLETE_FILTERS = new Set([
   FIELD.submittal,
   FIELD.status,
 ]);
+const PRESERVE_NONBLANK_FIELDS = [
+  FIELD.drawing,
+  FIELD.category,
+  FIELD.type,
+  FIELD.endConnection,
+  FIELD.submittal,
+];
 const COLUMN_PREF_KEY = "equipmentMaterialHiddenColumns";
 const COLUMN_ORDER_PREF_KEY = "equipmentMaterialColumnOrder";
 const COLUMN_WIDTH_PREF_KEY = "equipmentMaterialColumnWidths";
@@ -197,11 +204,22 @@ function rowKey(row) {
   return String(row._rowNumber || row[FIELD.tag] || state.rows.indexOf(row));
 }
 
+function hasMeaningfulValue(value) {
+  return value !== undefined && value !== null && String(value).trim() !== "";
+}
+
 function mergeRowsPreservingMissingFields(currentRows = [], existingRows = []) {
   const existingByKey = new Map(existingRows.map((row) => [rowKey(row), row]));
   return currentRows.map((row) => {
     const existing = existingByKey.get(rowKey(row));
-    return existing ? { ...existing, ...row } : row;
+    if (!existing) return row;
+    const merged = { ...existing, ...row };
+    PRESERVE_NONBLANK_FIELDS.forEach((field) => {
+      if (!hasMeaningfulValue(row[field]) && hasMeaningfulValue(existing[field])) {
+        merged[field] = existing[field];
+      }
+    });
+    return merged;
   });
 }
 
