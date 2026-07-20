@@ -1221,6 +1221,77 @@ tr:hover td {
   padding: 10px;
 }
 
+.report-layout {
+  display: grid;
+  gap: 14px;
+}
+
+.report-controls {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  padding: 14px;
+}
+
+.report-controls label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  min-width: 220px;
+  text-transform: uppercase;
+}
+
+.report-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.report-summary article {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+}
+
+.report-summary span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.report-summary strong {
+  font-size: 19px;
+}
+
+.report-summary .is-negative {
+  color: var(--danger);
+}
+
+.report-table-shell {
+  max-height: calc(100vh - 250px);
+}
+
+.report-table {
+  min-width: 1420px;
+  table-layout: auto;
+}
+
+.number-cell {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.report-discrepancy td {
+  background: #fff6e9;
+}
+
 .source-grid {
   display: grid;
   grid-template-columns: 1fr 2fr;
@@ -1285,12 +1356,14 @@ dd {
   .development-notes-layout,
   .admin-grid,
   .procurement-board,
+  .report-summary,
   .source-grid {
     grid-template-columns: 1fr;
   }
 
   .topbar,
-  .top-actions {
+  .top-actions,
+  .report-controls {
     align-items: stretch;
     flex-direction: column;
   }

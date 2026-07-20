@@ -62,7 +62,7 @@ const state = {
   },
 };
 
-const VALID_VIEWS = new Set(["dashboard", "log", "procurement", "development", "admin"]);
+const VALID_VIEWS = new Set(["dashboard", "log", "procurement", "reports", "development", "admin"]);
 const ACTION_COLUMN_WIDTH = 82;
 const DEFAULT_COLUMN_WIDTH = 150;
 const MIN_COLUMN_WIDTH = 80;
@@ -134,6 +134,13 @@ const els = {
   tableScrollTop: document.querySelector("#tableScrollTop"),
   tableScrollTopInner: document.querySelector("#tableScrollTopInner"),
   procurementBoard: document.querySelector("#procurementBoard"),
+  reportProject: document.querySelector("#reportProjectSelect"),
+  reportProvider: document.querySelector("#reportProviderSelect"),
+  providerReportSummary: document.querySelector("#providerReportSummary"),
+  providerReportHead: document.querySelector("#providerReportHead"),
+  providerReportBody: document.querySelector("#providerReportBody"),
+  printProviderReport: document.querySelector("#printProviderReportButton"),
+  exportProviderReport: document.querySelector("#exportProviderReportButton"),
   developmentNoteForm: document.querySelector("#developmentNoteForm"),
   developmentNoteInput: document.querySelector("#developmentNoteInput"),
   developmentNoteInitials: document.querySelector("#developmentNoteInitials"),
@@ -718,6 +725,25 @@ function formattedDeliveryMoney(value) {
     style: "currency",
     currency: "USD",
   });
+}
+
+function moneyValue(value) {
+  const amount = numeric(value);
+  return amount === null ? 0 : amount;
+}
+
+function formattedMoney(value) {
+  return moneyValue(value).toLocaleString(undefined, {
+    style: "currency",
+    currency: "USD",
+  });
+}
+
+function reportLineAmount(quantity, unitPrice) {
+  const qty = numeric(quantity);
+  const price = numeric(unitPrice);
+  if (qty === null || price === null) return 0;
+  return qty * price;
 }
 
 function calculatedExpectedDelivery(row) {
@@ -2648,6 +2674,242 @@ function renderProcurement() {
   }).join("");
 }
 
+function reportProjects() {
+  return state.projects.filter((project) => !project.archived || project.id === state.activeProjectId);
+}
+
+function selectedReportProjects() {
+  const selected = els.reportProject.value;
+  const projects = reportProjects();
+  return selected === "all"
+    ? projects
+    : projects.filter((project) => project.id === selected);
+}
+
+function providerReportLines() {
+  const selectedProvider = clean(els.reportProvider.value);
+  return selectedReportProjects().flatMap((project) => {
+    const rows = loadRowsForProject(project);
+    return rows.flatMap((row) => {
+      const provider = clean(row[FIELD.provider]) || "No provider";
+      if (selectedProvider !== "all" && provider !== selectedProvider) return [];
+      return rowDeliveries(row)
+        .filter((delivery) => numeric(delivery.qtyDelivered) !== null && numeric(delivery.qtyDelivered) > 0)
+        .map((delivery) => {
+          const poAmount = reportLineAmount(delivery.qtyDelivered, delivery.unitPricePo);
+          const invoiceAmount = reportLineAmount(delivery.qtyDelivered, delivery.unitPriceInvoice);
+          return {
+            project: project.name,
+            provider,
+            tag: clean(row[FIELD.tag]),
+            item: clean(row[FIELD.item]),
+            deliveryDate: formattedDeliveryDate(delivery),
+            ticket: clean(delivery.ticketNumber),
+            quantity: numeric(delivery.qtyDelivered) ?? clean(delivery.qtyDelivered),
+            units: clean(delivery.units) || clean(row[FIELD.units]),
+            poUnit: moneyValue(delivery.unitPricePo),
+            invoiceUnit: moneyValue(delivery.unitPriceInvoice),
+            poAmount,
+            invoiceAmount,
+            variance: invoiceAmount - poAmount,
+            notes: clean(delivery.notes),
+          };
+        });
+    });
+  });
+}
+
+function providerReportTotals(lines) {
+  return lines.reduce((totals, line) => {
+    totals.quantity += numeric(line.quantity) || 0;
+    totals.poAmount += line.poAmount;
+    totals.invoiceAmount += line.invoiceAmount;
+    totals.variance += line.variance;
+    if (Math.abs(line.variance) > 0.005) totals.discrepancies += 1;
+    return totals;
+  }, {
+    quantity: 0,
+    poAmount: 0,
+    invoiceAmount: 0,
+    variance: 0,
+    discrepancies: 0,
+  });
+}
+
+function populateReportFilters() {
+  const projects = reportProjects();
+  const currentProjectValue = els.reportProject.value || state.activeProjectId;
+  els.reportProject.innerHTML = [
+    `<option value="all">All active projects</option>`,
+    ...projects.map((project) => `<option value="${escapeHtml(project.id)}">${escapeHtml(project.name)}</option>`),
+  ].join("");
+  els.reportProject.value = projects.some((project) => project.id === currentProjectValue) ? currentProjectValue : "all";
+
+  const providers = uniqueSorted(selectedReportProjects()
+    .flatMap((project) => loadRowsForProject(project))
+    .filter((row) => rowDeliveries(row).length)
+    .map((row) => clean(row[FIELD.provider]) || "No provider"));
+  const currentProviderValue = els.reportProvider.value || "all";
+  els.reportProvider.innerHTML = [
+    `<option value="all">All providers</option>`,
+    ...providers.map((provider) => `<option value="${escapeHtml(provider)}">${escapeHtml(provider)}</option>`),
+  ].join("");
+  els.reportProvider.value = providers.includes(currentProviderValue) ? currentProviderValue : "all";
+}
+
+function reportTableRows(lines) {
+  return lines.map((line) => `
+    <tr class="${Math.abs(line.variance) > 0.005 ? "report-discrepancy" : ""}">
+      <td>${escapeHtml(line.project)}</td>
+      <td>${escapeHtml(line.provider)}</td>
+      <td>${escapeHtml(line.tag)}</td>
+      <td>${escapeHtml(line.item)}</td>
+      <td>${escapeHtml(line.deliveryDate)}</td>
+      <td>${escapeHtml(line.ticket)}</td>
+      <td class="number-cell">${escapeHtml(line.quantity)}</td>
+      <td>${escapeHtml(line.units)}</td>
+      <td class="number-cell">${escapeHtml(formattedMoney(line.poUnit))}</td>
+      <td class="number-cell">${escapeHtml(formattedMoney(line.invoiceUnit))}</td>
+      <td class="number-cell">${escapeHtml(formattedMoney(line.poAmount))}</td>
+      <td class="number-cell">${escapeHtml(formattedMoney(line.invoiceAmount))}</td>
+      <td class="number-cell">${escapeHtml(formattedMoney(line.variance))}</td>
+      <td>${escapeHtml(line.notes)}</td>
+    </tr>
+  `).join("");
+}
+
+function renderProviderReport() {
+  if (!els.reportProject || !els.reportProvider) return;
+  populateReportFilters();
+  const lines = providerReportLines();
+  const totals = providerReportTotals(lines);
+  els.providerReportSummary.innerHTML = `
+    <article><span>Delivered Lines</span><strong>${lines.length}</strong></article>
+    <article><span>Discrepancies</span><strong>${totals.discrepancies}</strong></article>
+    <article><span>PO Total</span><strong>${escapeHtml(formattedMoney(totals.poAmount))}</strong></article>
+    <article><span>Invoice Total</span><strong>${escapeHtml(formattedMoney(totals.invoiceAmount))}</strong></article>
+    <article><span>Variance</span><strong class="${Math.abs(totals.variance) > 0.005 ? "is-negative" : ""}">${escapeHtml(formattedMoney(totals.variance))}</strong></article>
+  `;
+  els.providerReportHead.innerHTML = `
+    <tr>
+      ${["Project", "Provider", "Tag #", "Item Description", "Delivery Date", "Ticket #", "Qty", "Units", "PO Unit", "Invoice Unit", "PO Amount", "Invoice Amount", "Variance", "Notes"].map((header) => `<th>${escapeHtml(header)}</th>`).join("")}
+    </tr>
+  `;
+  els.providerReportBody.innerHTML = reportTableRows(lines) || `<tr><td colspan="14" class="empty">No delivered items match this report.</td></tr>`;
+}
+
+function providerReportWorksheetRows(lines = providerReportLines()) {
+  return [
+    ["Project", "Provider", "Tag #", "Item Description", "Delivery Date", "Ticket #", "Qty", "Units", "PO Unit", "Invoice Unit", "PO Amount", "Invoice Amount", "Variance", "Notes"],
+    ...lines.map((line) => [
+      line.project,
+      line.provider,
+      line.tag,
+      line.item,
+      line.deliveryDate,
+      line.ticket,
+      line.quantity,
+      line.units,
+      formattedMoney(line.poUnit),
+      formattedMoney(line.invoiceUnit),
+      formattedMoney(line.poAmount),
+      formattedMoney(line.invoiceAmount),
+      formattedMoney(line.variance),
+      line.notes,
+    ]),
+  ];
+}
+
+function providerReportTitle() {
+  const projectLabel = selectedOptionLabel(els.reportProject);
+  const providerLabel = selectedOptionLabel(els.reportProvider);
+  return `PO vs Invoice Report - ${projectLabel} - ${providerLabel}`;
+}
+
+function exportProviderReport() {
+  const lines = providerReportLines();
+  const totals = providerReportTotals(lines);
+  const worksheetRows = [
+    ...providerReportWorksheetRows(lines),
+    [],
+    ["Totals", "", "", "", "", "", "", "", "", "", formattedMoney(totals.poAmount), formattedMoney(totals.invoiceAmount), formattedMoney(totals.variance), ""],
+  ];
+  const xml = buildExcelXml(providerReportTitle(), worksheetRows);
+  const dateStamp = new Date().toISOString().slice(0, 10);
+  downloadTextFile(xml, `${safeFileName(providerReportTitle())}-${dateStamp}.xls`, "application/vnd.ms-excel;charset=utf-8");
+}
+
+function printProviderReport() {
+  const lines = providerReportLines();
+  const totals = providerReportTotals(lines);
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) {
+    window.print();
+    return;
+  }
+  const generatedAt = new Date().toLocaleString();
+  printWindow.document.open();
+  printWindow.document.write(`<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>${escapeHtml(providerReportTitle())}</title>
+    <style>
+      @page { size: landscape; margin: 0.35in; }
+      * { box-sizing: border-box; }
+      body { margin: 0; color: #15221d; font-family: Arial, sans-serif; font-size: 9px; }
+      header { margin-bottom: 12px; }
+      h1 { margin: 0 0 4px; font-size: 18px; }
+      .meta { color: #52635d; font-size: 10px; margin-bottom: 6px; }
+      .summary { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+      .summary span { border: 1px solid #c4cec9; border-radius: 4px; padding: 4px 6px; }
+      table { width: 100%; border-collapse: collapse; table-layout: auto; }
+      th, td { border: 1px solid #9eadab; padding: 4px 5px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+      th { background: #edf2ef; font-size: 8px; text-transform: uppercase; }
+      .number-cell { text-align: right; white-space: nowrap; }
+      .report-discrepancy td { background: #fff6e9; }
+      tbody tr:nth-child(even) td { background: #f8faf8; }
+      tfoot td { font-weight: 800; background: #edf2ef; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>${escapeHtml(providerReportTitle())}</h1>
+      <div class="meta">Generated ${escapeHtml(generatedAt)}</div>
+      <div class="summary">
+        <span>Delivered Lines: ${lines.length}</span>
+        <span>Discrepancies: ${totals.discrepancies}</span>
+        <span>PO Total: ${escapeHtml(formattedMoney(totals.poAmount))}</span>
+        <span>Invoice Total: ${escapeHtml(formattedMoney(totals.invoiceAmount))}</span>
+        <span>Variance: ${escapeHtml(formattedMoney(totals.variance))}</span>
+      </div>
+    </header>
+    <table>
+      <thead>
+        <tr>${providerReportWorksheetRows([])[0].map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr>
+      </thead>
+      <tbody>${reportTableRows(lines) || `<tr><td colspan="14">No delivered items match this report.</td></tr>`}</tbody>
+      <tfoot>
+        <tr>
+          <td colspan="10">Totals</td>
+          <td class="number-cell">${escapeHtml(formattedMoney(totals.poAmount))}</td>
+          <td class="number-cell">${escapeHtml(formattedMoney(totals.invoiceAmount))}</td>
+          <td class="number-cell">${escapeHtml(formattedMoney(totals.variance))}</td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+    <script>
+      window.addEventListener("load", () => {
+        window.focus();
+        window.print();
+      });
+    <\/script>
+  </body>
+</html>`);
+  printWindow.document.close();
+}
+
 function renderDevelopmentNotes() {
   const notes = [...state.developmentNotes].sort((a, b) => {
     const statusOrder = { open: 0, implemented: 1, rejected: 2 };
@@ -2746,6 +3008,7 @@ function render() {
   renderDashboard();
   renderLog();
   renderProcurement();
+  renderProviderReport();
   renderDevelopmentNotes();
   renderAdmin();
 }
@@ -2775,6 +3038,7 @@ function setView(view) {
     dashboard: "Dashboard",
     log: "Material Log",
     procurement: "Procurement",
+    reports: "Reports",
     development: "Development Notes",
     admin: "Admin",
   }[view];
@@ -2783,7 +3047,7 @@ function setView(view) {
   if (els.tableScrollTop) {
     els.tableScrollTop.style.display = showColumnControls ? "block" : "none";
   }
-  document.querySelector(".filters").style.display = ["admin", "development"].includes(view) ? "none" : "grid";
+  document.querySelector(".filters").style.display = ["admin", "development", "reports"].includes(view) ? "none" : "grid";
   if (!showColumnControls) {
     els.columnMenu.hidden = true;
     els.columnToggle.setAttribute("aria-expanded", "false");
@@ -2888,6 +3152,11 @@ async function init() {
   els.exportExcel.addEventListener("click", exportMaterialLog);
 
   els.printLog.addEventListener("click", printMaterialLog);
+
+  els.reportProject.addEventListener("change", renderProviderReport);
+  els.reportProvider.addEventListener("change", renderProviderReport);
+  els.printProviderReport.addEventListener("click", printProviderReport);
+  els.exportProviderReport.addEventListener("click", exportProviderReport);
 
   els.downloadTemplate.addEventListener("click", downloadImportTemplate);
 

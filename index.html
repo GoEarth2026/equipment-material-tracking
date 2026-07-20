@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Equipment &amp; Material Tracking</title>
-    <link rel="stylesheet" href="./styles.css?v=preserve-blanks1" />
+    <link rel="stylesheet" href="./styles.css?v=provider-report1" />
   </head>
   <body>
     <div class="app-shell" id="appShell">
@@ -21,6 +21,7 @@
           <button class="nav-tab is-active" data-view="dashboard" type="button">Dashboard</button>
           <button class="nav-tab" data-view="log" type="button">Material Log</button>
           <button class="nav-tab" data-view="procurement" type="button">Procurement</button>
+          <button class="nav-tab" data-view="reports" type="button">Reports</button>
           <button class="nav-tab" data-view="development" type="button">Development Notes</button>
           <button class="nav-tab" data-view="admin" type="button">Admin</button>
         </nav>
@@ -110,6 +111,30 @@
 
         <section class="view" id="procurementView">
           <div class="procurement-board" id="procurementBoard"></div>
+        </section>
+
+        <section class="view" id="reportsView">
+          <div class="report-layout">
+            <section class="panel report-controls">
+              <label>
+                Project
+                <select id="reportProjectSelect"></select>
+              </label>
+              <label>
+                Provider
+                <select id="reportProviderSelect"></select>
+              </label>
+              <button class="ghost-button" id="printProviderReportButton" type="button">Print Report</button>
+              <button class="ghost-button" id="exportProviderReportButton" type="button">Export Report</button>
+            </section>
+            <section class="report-summary" id="providerReportSummary"></section>
+            <section class="table-shell report-table-shell">
+              <table class="report-table">
+                <thead id="providerReportHead"></thead>
+                <tbody id="providerReportBody"></tbody>
+              </table>
+            </section>
+          </div>
         </section>
 
         <section class="view" id="developmentView">
@@ -252,6 +277,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="./supabase-config.js"></script>
-    <script src="./app.js?v=preserve-blanks1"></script>
+    <script src="./app.js?v=provider-report1"></script>
   </body>
 </html>
