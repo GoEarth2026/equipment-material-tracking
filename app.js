@@ -43,6 +43,7 @@ const state = {
   hiddenColumns: new Set(),
   columnOrder: [],
   columnWidths: {},
+  deletedRowsByProject: {},
   logColumnFilters: {},
   logSort: { column: null, direction: "asc" },
   deletedRowKeys: new Set(),
@@ -215,35 +216,108 @@ function hasMeaningfulValue(value) {
   return value !== undefined && value !== null && String(value).trim() !== "";
 }
 
-function mergeRowsPreservingMissingFields(currentRows = [], existingRows = []) {
+function mergeObjectsPreservingValues(current = {}, existing = {}) {
+  const merged = { ...existing, ...current };
+  Object.keys(existing).forEach((field) => {
+    if (!hasMeaningfulValue(current[field]) && hasMeaningfulValue(existing[field])) {
+      merged[field] = existing[field];
+    }
+  });
+  return merged;
+}
+
+function deliveryKey(delivery, index) {
+  return clean(delivery?.id) || [
+    clean(delivery?.deliveryDate),
+    clean(delivery?.ticketNumber),
+    clean(delivery?.qtyDelivered),
+    index,
+  ].join("|");
+}
+
+function mergeDeliveries(currentDeliveries = [], existingDeliveries = []) {
+  const currentKeys = new Set(currentDeliveries.map(deliveryKey));
+  const existingByKey = new Map(existingDeliveries.map((delivery, index) => [deliveryKey(delivery, index), delivery]));
+  const merged = currentDeliveries.map((delivery, index) => {
+    const existing = existingByKey.get(deliveryKey(delivery, index));
+    return existing ? mergeObjectsPreservingValues(delivery, existing) : delivery;
+  });
+  existingDeliveries.forEach((delivery, index) => {
+    if (!currentKeys.has(deliveryKey(delivery, index))) merged.push(delivery);
+  });
+  return merged;
+}
+
+function mergeRowsPreservingMissingFields(currentRows = [], existingRows = [], deletedKeys = new Set()) {
   const existingByKey = new Map(existingRows.map((row) => [rowKey(row), row]));
-  return currentRows.map((row) => {
+  const currentKeys = new Set(currentRows.map(rowKey));
+  const mergedRows = currentRows.map((row) => {
     const existing = existingByKey.get(rowKey(row));
     if (!existing) return row;
-    const merged = { ...existing, ...row };
+    const merged = mergeObjectsPreservingValues(row, existing);
     PRESERVE_NONBLANK_FIELDS.forEach((field) => {
       if (!hasMeaningfulValue(row[field]) && hasMeaningfulValue(existing[field])) {
         merged[field] = existing[field];
       }
     });
+    if (Array.isArray(row._deliveries) || Array.isArray(existing._deliveries)) {
+      merged._deliveries = mergeDeliveries(row._deliveries || [], existing._deliveries || []);
+    }
     return merged;
   });
+  existingRows.forEach((row) => {
+    const key = rowKey(row);
+    if (!currentKeys.has(key) && !deletedKeys.has(key)) mergedRows.push(row);
+  });
+  return mergedRows;
 }
 
 function mergeSharedState(currentState, existingState = {}) {
   const existingRowsByProject = existingState.rowsByProject || {};
+  const currentDeleted = currentState.deletedRowsByProject || {};
+  const existingDeleted = existingState.deletedRowsByProject || {};
+  const deletedRowsByProject = { ...existingDeleted };
+  Object.entries(currentDeleted).forEach(([projectId, keys]) => {
+    deletedRowsByProject[projectId] = [...new Set([...(existingDeleted[projectId] || []), ...(keys || [])])];
+  });
   const mergedRowsByProject = {};
   Object.entries(currentState.rowsByProject || {}).forEach(([projectId, rows]) => {
-    mergedRowsByProject[projectId] = mergeRowsPreservingMissingFields(rows, existingRowsByProject[projectId] || []);
+    mergedRowsByProject[projectId] = mergeRowsPreservingMissingFields(
+      rows,
+      existingRowsByProject[projectId] || [],
+      new Set(deletedRowsByProject[projectId] || []),
+    );
   });
   Object.entries(existingRowsByProject).forEach(([projectId, rows]) => {
-    if (!mergedRowsByProject[projectId]) mergedRowsByProject[projectId] = rows;
+    if (!mergedRowsByProject[projectId]) {
+      const deletedKeys = new Set(deletedRowsByProject[projectId] || []);
+      mergedRowsByProject[projectId] = rows.filter((row) => !deletedKeys.has(rowKey(row)));
+    }
   });
   return {
     ...existingState,
     ...currentState,
     rowsByProject: mergedRowsByProject,
+    deletedRowsByProject,
   };
+}
+
+function sharedStateWithoutBackups(sharedState = {}) {
+  const { backupSnapshots, ...snapshot } = sharedState;
+  return snapshot;
+}
+
+function sharedBackupSnapshots(existingState = {}) {
+  const backups = Array.isArray(existingState.backupSnapshots) ? existingState.backupSnapshots : [];
+  const lastBackup = backups[0];
+  const now = Date.now();
+  if (lastBackup?.createdAt && now - Date.parse(lastBackup.createdAt) < 15 * 60 * 1000) {
+    return backups;
+  }
+  return [{
+    createdAt: new Date(now).toISOString(),
+    data: sharedStateWithoutBackups(existingState),
+  }, ...backups].slice(0, 12);
 }
 
 function isAddedRow(row) {
@@ -283,6 +357,7 @@ function projectRowsFromStorage(projectId) {
 
 function collectSharedState() {
   state.rowsByProject[state.activeProjectId] = state.rows;
+  state.deletedRowsByProject[state.activeProjectId] = [...state.deletedRowKeys];
   state.projects.forEach((project) => {
     if (!state.rowsByProject[project.id]) {
       state.rowsByProject[project.id] = projectRowsFromStorage(project.id)
@@ -292,6 +367,7 @@ function collectSharedState() {
   return {
     projects: state.projects,
     rowsByProject: state.rowsByProject,
+    deletedRowsByProject: state.deletedRowsByProject,
     adminLists: state.adminLists,
     developmentNotes: state.developmentNotes,
     updatedAt: new Date().toISOString(),
@@ -322,6 +398,11 @@ async function loadSharedState() {
       const shared = data.data;
       state.projects = Array.isArray(shared.projects) && shared.projects.length ? shared.projects : state.projects;
       state.rowsByProject = shared.rowsByProject || {};
+      state.deletedRowsByProject = shared.deletedRowsByProject || {};
+      Object.entries(state.deletedRowsByProject).forEach(([projectId, keys]) => {
+        const deletedKeys = new Set(keys || []);
+        state.rowsByProject[projectId] = (state.rowsByProject[projectId] || []).filter((row) => !deletedKeys.has(rowKey(row)));
+      });
       state.adminLists = shared.adminLists || state.adminLists;
       state.developmentNotes = Array.isArray(shared.developmentNotes) ? shared.developmentNotes : [];
       state.adminListsLoadedFromCloud = Boolean(shared.adminLists);
@@ -360,6 +441,7 @@ async function maybeMigrateLocalStorageToSupabase() {
     if (error) throw error;
     state.projects = localState.projects;
     state.rowsByProject = localState.rowsByProject;
+    state.deletedRowsByProject = localState.deletedRowsByProject || {};
     state.adminLists = localState.adminLists;
     state.developmentNotes = localState.developmentNotes || [];
     state.adminListsLoadedFromCloud = true;
@@ -393,6 +475,9 @@ async function saveSharedState() {
       .maybeSingle();
     if (readError) throw readError;
     const mergedState = existingData?.data ? mergeSharedState(currentState, existingData.data) : currentState;
+    if (existingData?.data) {
+      mergedState.backupSnapshots = sharedBackupSnapshots(existingData.data);
+    }
     const { error } = await state.supabaseClient
       .from("equipment_material_app_state")
       .upsert({ id: "main", data: mergedState });
@@ -464,8 +549,10 @@ function collectLocalStorageSharedState() {
   }
 
   const rowsByProject = {};
+  const deletedRowsByProject = {};
   normalizedProjects.forEach((project) => {
     const localRows = projectRowsFromStorage(project.id);
+    deletedRowsByProject[project.id] = safeJsonParse(localStorage.getItem(DELETED_ITEMS_PREF_KEY), []);
     const isBaselineProject = project.baseline || project.id === "hampton-wwtp-phase-ii";
     rowsByProject[project.id] = localRows?.length
       ? localRows
@@ -487,6 +574,7 @@ function collectLocalStorageSharedState() {
   return {
     projects: normalizedProjects,
     rowsByProject,
+    deletedRowsByProject,
     adminLists,
     developmentNotes: safeJsonParse(localStorage.getItem(DEVELOPMENT_NOTES_PREF_KEY), []),
     updatedAt: new Date().toISOString(),
@@ -500,6 +588,7 @@ function activeProject() {
 
 function saveCurrentProjectRows() {
   state.rowsByProject[state.activeProjectId] = state.rows;
+  state.deletedRowsByProject[state.activeProjectId] = [...state.deletedRowKeys];
   localStorage.setItem(projectRowsKey(), JSON.stringify(state.rows));
   queueSharedSave();
 }
@@ -536,7 +625,9 @@ function loadProject(projectId) {
   saveCurrentProjectRows();
   state.activeProjectId = nextProject.id;
   localStorage.setItem(ACTIVE_PROJECT_PREF_KEY, state.activeProjectId);
+  state.deletedRowKeys = new Set(state.deletedRowsByProject[state.activeProjectId] || []);
   state.rows = loadRowsForProject(nextProject);
+  state.rows = state.rows.filter((row) => !state.deletedRowKeys.has(rowKey(row)));
   state.filtered = state.rows.filter(matchesFilters);
   loadAdminLists();
   resetLogControlsForProject();
@@ -851,6 +942,7 @@ function loadDeletedItems() {
 }
 
 function saveDeletedItems() {
+  state.deletedRowsByProject[state.activeProjectId] = [...state.deletedRowKeys];
   localStorage.setItem(DELETED_ITEMS_PREF_KEY, JSON.stringify([...state.deletedRowKeys]));
   saveCurrentProjectRows();
 }
@@ -3066,7 +3158,9 @@ async function init() {
   if (!state.projects.some((project) => project.id === state.activeProjectId)) {
     state.activeProjectId = state.projects[0].id;
   }
+  state.deletedRowKeys = new Set(state.deletedRowsByProject[state.activeProjectId] || []);
   state.rows = loadRowsForProject(activeProject());
+  state.rows = state.rows.filter((row) => !state.deletedRowKeys.has(rowKey(row)));
   if (activeProject()?.baseline && !localStorage.getItem(projectRowsKey())) {
     loadAddedItems();
     loadSavedEdits();
