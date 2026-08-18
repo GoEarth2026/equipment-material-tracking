@@ -302,22 +302,9 @@ function mergeSharedState(currentState, existingState = {}) {
   };
 }
 
-function sharedStateWithoutBackups(sharedState = {}) {
-  const { backupSnapshots, ...snapshot } = sharedState;
-  return snapshot;
-}
-
-function sharedBackupSnapshots(existingState = {}) {
-  const backups = Array.isArray(existingState.backupSnapshots) ? existingState.backupSnapshots : [];
-  const lastBackup = backups[0];
-  const now = Date.now();
-  if (lastBackup?.createdAt && now - Date.parse(lastBackup.createdAt) < 15 * 60 * 1000) {
-    return backups;
-  }
-  return [{
-    createdAt: new Date(now).toISOString(),
-    data: sharedStateWithoutBackups(existingState),
-  }, ...backups].slice(0, 12);
+function stripSharedBackups(sharedState = {}) {
+  const { backupSnapshots, ...withoutBackups } = sharedState || {};
+  return withoutBackups;
 }
 
 function isAddedRow(row) {
@@ -540,10 +527,8 @@ async function saveSharedState() {
       .eq("id", "main")
       .maybeSingle();
     if (readError) throw readError;
-    const mergedState = existingData?.data ? mergeSharedState(currentState, existingData.data) : currentState;
-    if (existingData?.data) {
-      mergedState.backupSnapshots = sharedBackupSnapshots(existingData.data);
-    }
+    const existingState = existingData?.data ? stripSharedBackups(existingData.data) : null;
+    const mergedState = existingState ? mergeSharedState(currentState, existingState) : stripSharedBackups(currentState);
     const { error } = await state.supabaseClient
       .from("equipment_material_app_state")
       .upsert({ id: "main", data: mergedState });
@@ -554,7 +539,8 @@ async function saveSharedState() {
     console.error(error);
     state.cloudReady = false;
     state.supabaseClient = null;
-    setSyncStatus("Shared database save failed", "local");
+    const detail = clean(error?.message || error?.details || error?.code);
+    setSyncStatus(detail ? `Shared database save failed - ${detail}` : "Shared database save failed", "local");
     render();
   }
 }
@@ -844,6 +830,7 @@ function normalizeEditedValue(header, value) {
 }
 
 function shouldAutosaveTextInput(header) {
+  if (AUTOCOMPLETE_FILTERS.has(header)) return false;
   return ![
     FIELD.quantity,
     FIELD.qtyDelivered,
