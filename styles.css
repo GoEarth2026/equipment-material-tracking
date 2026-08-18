@@ -249,6 +249,10 @@ p {
   color: var(--warn);
 }
 
+.sync-status[data-mode="local"] {
+  color: #b42318;
+}
+
 #view-title {
   font-size: 30px;
   line-height: 1.1;
@@ -295,6 +299,20 @@ select {
   border-radius: 8px;
   padding: 0 13px;
   cursor: pointer;
+}
+
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.is-shared-readonly [contenteditable="false"].editable-cell {
+  background: #f6f7f6;
+  color: #64706b;
+  cursor: not-allowed;
 }
 
 .filters {

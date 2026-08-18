@@ -341,6 +341,70 @@ function setSyncStatus(message, mode = "local") {
   if (!els.syncStatus) return;
   els.syncStatus.textContent = message;
   els.syncStatus.dataset.mode = mode;
+  updateSharedEditingControls();
+}
+
+function canEditSharedData() {
+  return Boolean(state.supabaseClient && state.cloudReady);
+}
+
+function sharedEditingDisabledMessage() {
+  return "Editing is disabled because the shared Supabase database is not connected. Refresh after Supabase is healthy, then try again.";
+}
+
+function requireSharedEditing() {
+  if (canEditSharedData()) return true;
+  alert(sharedEditingDisabledMessage());
+  return false;
+}
+
+function updateSharedEditingControls() {
+  const disabled = !canEditSharedData();
+  document.body.classList.toggle("is-shared-readonly", disabled);
+
+  [
+    els.addItem,
+    els.importLog,
+    els.projectInput,
+    els.supplierInput,
+    els.statusAdminInput,
+    els.importFile,
+    els.importMode,
+    els.developmentNoteInput,
+    els.developmentNoteInitials,
+    els.userInitialsInput,
+    els.deliveryDate,
+    els.deliveryTicket,
+    els.deliveryQty,
+    els.deliveryUnits,
+    els.deliveryUnitPricePo,
+    els.deliveryUnitPriceInvoice,
+    els.deliveryNotes,
+  ].filter(Boolean).forEach((control) => {
+    control.disabled = disabled;
+  });
+
+  [
+    els.projectForm?.querySelector("button"),
+    els.supplierForm?.querySelector("button"),
+    els.statusAdminForm?.querySelector("button"),
+    els.developmentNoteForm?.querySelector("button[type='submit']"),
+    els.deliveryForm?.querySelector("button[type='submit']"),
+  ].filter(Boolean).forEach((button) => {
+    button.disabled = disabled;
+  });
+
+  document.querySelectorAll(
+    "[data-edit-column], [data-status-row], [data-checkbox-row], [data-add-delivery-row], [data-edit-delivery-row], [data-remove-delivery-row], [data-add-note-row], [data-edit-note-row], [data-insert-row], [data-remove-row], [data-remove-list], [data-rename-status], [data-archive-project], [data-restore-project]",
+  ).forEach((control) => {
+    if (control.matches("[data-edit-column]")) {
+      control.contentEditable = disabled ? "false" : "true";
+      control.tabIndex = disabled ? -1 : 0;
+      control.setAttribute("aria-readonly", disabled ? "true" : "false");
+    } else {
+      control.disabled = disabled;
+    }
+  });
 }
 
 function projectRowsFromStorage(projectId) {
@@ -406,20 +470,22 @@ async function loadSharedState() {
       state.adminLists = shared.adminLists || state.adminLists;
       state.developmentNotes = Array.isArray(shared.developmentNotes) ? shared.developmentNotes : [];
       state.adminListsLoadedFromCloud = Boolean(shared.adminLists);
+      state.cloudReady = true;
       setSyncStatus("Shared database connected", "cloud");
     } else {
       state.rowsByProject = {
         [defaultProjects()[0].id]: state.baseRows.map((row) => ({ ...row })),
       };
       await saveSharedState();
+      state.cloudReady = true;
       setSyncStatus("Shared database initialized", "cloud");
     }
-    state.cloudReady = true;
     return true;
   } catch (error) {
     console.error(error);
     setSyncStatus("Local mode - Supabase connection failed", "local");
     state.supabaseClient = null;
+    state.cloudReady = false;
     return false;
   }
 }
@@ -457,7 +523,7 @@ async function maybeMigrateLocalStorageToSupabase() {
 }
 
 function queueSharedSave() {
-  if (!state.supabaseClient || !state.cloudReady) return;
+  if (!canEditSharedData()) return;
   clearTimeout(state.cloudSaveTimer);
   state.cloudSaveTimer = setTimeout(() => {
     saveSharedState();
@@ -486,7 +552,10 @@ async function saveSharedState() {
     setSyncStatus("Shared database saved", "cloud");
   } catch (error) {
     console.error(error);
+    state.cloudReady = false;
+    state.supabaseClient = null;
     setSyncStatus("Shared database save failed", "local");
+    render();
   }
 }
 
@@ -649,6 +718,7 @@ function slugProjectName(name) {
 }
 
 function addProject(name) {
+  if (!requireSharedEditing()) return;
   const projectName = clean(name);
   if (!projectName) return;
   saveCurrentProjectRows();
@@ -665,6 +735,7 @@ function addProject(name) {
 }
 
 function archiveProject(projectId) {
+  if (!requireSharedEditing()) return;
   const project = state.projects.find((item) => item.id === projectId);
   if (!project || project.archived) return;
   if (!confirm(`Archive ${project.name}?`)) return;
@@ -680,6 +751,7 @@ function archiveProject(projectId) {
 }
 
 function restoreProject(projectId) {
+  if (!requireSharedEditing()) return;
   const project = state.projects.find((item) => item.id === projectId);
   if (!project) return;
   project.archived = false;
@@ -869,6 +941,7 @@ function loadSavedEdits() {
 }
 
 function saveCellEdit(row, header, value) {
+  if (!requireSharedEditing()) return;
   let saved = {};
   try {
     saved = JSON.parse(localStorage.getItem(EDIT_PREF_KEY) || "{}");
@@ -948,6 +1021,7 @@ function saveDeletedItems() {
 }
 
 function addItem() {
+  if (!requireSharedEditing()) return;
   const row = { _rowNumber: `new-${Date.now()}` };
   allTableHeaders().forEach((header) => {
     row[header] = [FIELD.critical, FIELD.delivered].includes(header) ? false : null;
@@ -989,6 +1063,7 @@ function createBlankItem() {
 }
 
 function insertItemNearRow(targetRowKey, position) {
+  if (!requireSharedEditing()) return;
   const targetIndex = state.rows.findIndex((row) => rowKey(row) === targetRowKey);
   const row = createBlankItem();
   const insertIndex = targetIndex === -1
@@ -1005,6 +1080,7 @@ function insertItemNearRow(targetRowKey, position) {
 }
 
 function removeItem(rowKeyValue) {
+  if (!requireSharedEditing()) return;
   const row = state.rows.find((candidate) => rowKey(candidate) === rowKeyValue);
   const label = clean(row?.[FIELD.tag]) || clean(row?.[FIELD.item]) || "this item";
   if (!confirm(`Remove ${label} from the log?`)) return;
@@ -1329,6 +1405,7 @@ function rowsFromImportGrid(grid) {
 }
 
 async function importMaterialLog() {
+  if (!requireSharedEditing()) return;
   const file = els.importFile.files?.[0];
   if (!file) {
     els.importStatus.textContent = "Choose a file first";
@@ -1376,6 +1453,7 @@ function ensureUserInitials() {
 }
 
 function appendNote(row) {
+  if (!requireSharedEditing()) return;
   const initials = ensureUserInitials();
   if (!initials) return;
   const text = prompt("Add note:");
@@ -1394,6 +1472,7 @@ function appendNote(row) {
 }
 
 function editItemNote(row, noteIndex) {
+  if (!requireSharedEditing()) return;
   const notes = parseNotes(row[FIELD.notes]);
   const note = notes[noteIndex];
   if (!note) return;
@@ -1434,6 +1513,7 @@ function loadDevelopmentNotes() {
 }
 
 function addDevelopmentNote(text, initials) {
+  if (!requireSharedEditing()) return;
   const noteText = clean(text);
   if (!noteText) return;
   const author = clean(initials || state.userInitials).toUpperCase() || "USER";
@@ -1454,6 +1534,7 @@ function addDevelopmentNote(text, initials) {
 }
 
 function updateDevelopmentNoteStatus(noteId, status) {
+  if (!requireSharedEditing()) return;
   const note = state.developmentNotes.find((item) => item.id === noteId);
   if (!note) return;
   note.status = status;
@@ -1498,6 +1579,7 @@ function saveAdminLists() {
 }
 
 function addAdminValue(listName, value, rerender = true) {
+  if (!requireSharedEditing()) return;
   const text = clean(value);
   if (!text) return;
   state.adminLists[listName] = uniqueSorted([...(state.adminLists[listName] || []), text]);
@@ -1510,6 +1592,7 @@ function addAdminValue(listName, value, rerender = true) {
 }
 
 function removeAdminValue(listName, value) {
+  if (!requireSharedEditing()) return;
   const text = clean(value);
   state.adminLists[listName] = (state.adminLists[listName] || []).filter((item) => item !== text);
   saveAdminLists();
@@ -1519,6 +1602,7 @@ function removeAdminValue(listName, value) {
 }
 
 function renameStatus(oldValue) {
+  if (!requireSharedEditing()) return;
   const oldStatus = clean(oldValue);
   if (!oldStatus) return;
   const newStatus = clean(prompt("Rename submittal status:", oldStatus));
@@ -2307,6 +2391,7 @@ function bindLogFieldTabbing() {
 }
 
 function commitEditableCell(cell) {
+  if (!canEditSharedData()) return false;
   const row = state.rows.find((candidate) => rowKey(candidate) === cell.dataset.editRow);
   if (!row) return false;
   const header = cell.dataset.editColumn;
@@ -2325,6 +2410,7 @@ function commitEditableCell(cell) {
 function bindEditableCells() {
   els.logBody.querySelectorAll("[data-edit-column]").forEach((cell) => {
     cell.addEventListener("input", () => {
+      if (!canEditSharedData()) return;
       const header = cell.dataset.editColumn;
       if (!shouldAutosaveTextInput(header)) return;
       const row = state.rows.find((candidate) => rowKey(candidate) === cell.dataset.editRow);
@@ -2333,6 +2419,7 @@ function bindEditableCells() {
     });
 
     cell.addEventListener("keydown", (event) => {
+      if (!canEditSharedData()) return;
       if (event.key === "Enter") {
         event.preventDefault();
         cell.blur();
@@ -2364,6 +2451,7 @@ function bindEditableCells() {
 }
 
 function saveActiveEditableCell() {
+  if (!canEditSharedData()) return;
   const cell = document.activeElement?.matches?.("[data-edit-column]") ? document.activeElement : null;
   if (!cell) return;
   const row = state.rows.find((candidate) => rowKey(candidate) === cell.dataset.editRow);
@@ -2429,6 +2517,7 @@ function closeDeliveryDialog() {
 }
 
 function openDeliveryDialog(row, index = null) {
+  if (!requireSharedEditing()) return;
   const deliveries = rowDeliveries(row);
   const existing = index === null ? {} : deliveries[index] || {};
   state.deliveryEditor = { rowKey: rowKey(row), index };
@@ -2452,6 +2541,7 @@ function openDeliveryDialog(row, index = null) {
 }
 
 function saveDeliveryDialog() {
+  if (!requireSharedEditing()) return;
   const row = state.rows.find((candidate) => rowKey(candidate) === state.deliveryEditor.rowKey);
   if (!row) return;
   const deliveries = rowDeliveries(row);
@@ -2471,6 +2561,7 @@ function saveDeliveryDialog() {
 }
 
 function saveDeliveryChanges(row) {
+  if (!requireSharedEditing()) return;
   syncDeliveredFromDeliveryQuantity(row);
   if (isAddedRow(row)) saveAddedItems();
   saveCurrentProjectRows();
@@ -2492,6 +2583,7 @@ function editDelivery(row, index) {
 }
 
 function removeDelivery(row, index) {
+  if (!requireSharedEditing()) return;
   const deliveries = rowDeliveries(row);
   const delivery = deliveries[index];
   if (!delivery) return;
@@ -2540,6 +2632,7 @@ function bindNoteButtons() {
 function renderNotesCell(row, header = FIELD.notes) {
   const notes = parseNotes(row[FIELD.notes]);
   const key = rowKey(row);
+  const disabled = canEditSharedData() ? "" : "disabled";
   return `
     <td class="notes-cell" data-cell-column="${escapeHtml(header)}" style="${columnStyle(header)}">
       <div class="note-timeline">
@@ -2547,13 +2640,13 @@ function renderNotesCell(row, header = FIELD.notes) {
           <div class="note-entry">
             <div class="note-entry-header">
               <div class="note-meta">${escapeHtml([note.timestamp, note.initials].filter(Boolean).join(" · "))}</div>
-              <button class="note-edit-button" type="button" data-edit-note-row="${escapeHtml(key)}" data-note-index="${index}">Edit</button>
+              <button class="note-edit-button" type="button" data-edit-note-row="${escapeHtml(key)}" data-note-index="${index}" ${disabled}>Edit</button>
             </div>
             <div class="note-text">${escapeHtml(note.text)}</div>
             ${note.editedTimestamp ? `<div class="note-edited-meta">${escapeHtml(["Edited", note.editedTimestamp, note.editedInitials].filter(Boolean).join(" · "))}</div>` : ""}
           </div>
         `).join("") || `<div class="meta">No notes yet.</div>`}
-        <button class="add-note-button" type="button" data-add-note-row="${escapeHtml(key)}">Add Note</button>
+        <button class="add-note-button" type="button" data-add-note-row="${escapeHtml(key)}" ${disabled}>Add Note</button>
       </div>
     </td>
   `;
@@ -2562,6 +2655,7 @@ function renderNotesCell(row, header = FIELD.notes) {
 function renderDeliveriesCell(row, header = FIELD.deliveries) {
   const deliveries = rowDeliveries(row);
   const key = rowKey(row);
+  const disabled = canEditSharedData() ? "" : "disabled";
   const deliveredQuantity = quantityDelivered(row);
   const requiredQuantity = numeric(row[FIELD.quantity]);
   const units = clean(deliveries.find((delivery) => clean(delivery.units))?.units);
@@ -2579,8 +2673,8 @@ function renderDeliveriesCell(row, header = FIELD.deliveries) {
               <div class="delivery-entry-header">
                 <span>${escapeHtml(formattedDeliveryDate(delivery) || "No date")}</span>
                 <div class="delivery-actions">
-                  <button class="note-edit-button" type="button" data-edit-delivery-row="${escapeHtml(key)}" data-delivery-index="${index}">Edit</button>
-                  <button class="note-edit-button danger" type="button" data-remove-delivery-row="${escapeHtml(key)}" data-delivery-index="${index}">Remove</button>
+                  <button class="note-edit-button" type="button" data-edit-delivery-row="${escapeHtml(key)}" data-delivery-index="${index}" ${disabled}>Edit</button>
+                  <button class="note-edit-button danger" type="button" data-remove-delivery-row="${escapeHtml(key)}" data-delivery-index="${index}" ${disabled}>Remove</button>
                 </div>
               </div>
               <div class="meta">${escapeHtml([
@@ -2596,7 +2690,7 @@ function renderDeliveriesCell(row, header = FIELD.deliveries) {
             </div>
           `).join("") || `<div class="meta">No deliveries yet.</div>`}
         </div>
-        <button class="add-note-button" type="button" data-add-delivery-row="${escapeHtml(key)}">Add Delivery</button>
+        <button class="add-note-button" type="button" data-add-delivery-row="${escapeHtml(key)}" ${disabled}>Add Delivery</button>
       </div>
     </td>
   `;
@@ -2605,11 +2699,15 @@ function renderDeliveriesCell(row, header = FIELD.deliveries) {
 function renderLogBody() {
   const headers = visibleLogHeaders();
   const rows = getLogRows();
+  const editingEnabled = canEditSharedData();
+  const disabled = editingEnabled ? "" : "disabled";
+  const editableAttribute = editingEnabled ? "true" : "false";
+  const editableTabIndex = editingEnabled ? "0" : "-1";
   els.logBody.innerHTML = rows.map((row) => `
     <tr>
       <td class="action-cell" style="width: ${ACTION_COLUMN_WIDTH}px; min-width: ${ACTION_COLUMN_WIDTH}px; max-width: ${ACTION_COLUMN_WIDTH}px;">
-        <button class="icon-row-button remove-row-button" type="button" data-remove-row="${escapeHtml(rowKey(row))}" aria-label="Remove item" title="Remove item">×</button>
-        <button class="icon-row-button insert-row-button" type="button" data-insert-row="${escapeHtml(rowKey(row))}" data-insert-position="below" aria-label="Insert row below" title="Insert row below">+</button>
+        <button class="icon-row-button remove-row-button" type="button" data-remove-row="${escapeHtml(rowKey(row))}" aria-label="Remove item" title="Remove item" ${disabled}>×</button>
+        <button class="icon-row-button insert-row-button" type="button" data-insert-row="${escapeHtml(rowKey(row))}" data-insert-position="below" aria-label="Insert row below" title="Insert row below" ${disabled}>+</button>
       </td>
       ${headers.map((header) => {
         const display = displayValue(row, header);
@@ -2619,7 +2717,7 @@ function renderLogBody() {
           const options = uniqueSorted([current, ...state.adminLists.statuses]);
           return `
             <td data-cell-column="${escapeHtml(header)}" style="${columnStyle(header)}">
-              <select class="cell-select" data-status-row="${escapeHtml(key)}" data-log-field-row="${escapeHtml(key)}" data-log-field-column="${escapeHtml(header)}">
+              <select class="cell-select" data-status-row="${escapeHtml(key)}" data-log-field-row="${escapeHtml(key)}" data-log-field-column="${escapeHtml(header)}" ${disabled}>
                 <option value=""></option>
                 ${options.map((status) => `<option value="${escapeHtml(status)}" ${status === current ? "selected" : ""}>${escapeHtml(status)}</option>`).join("")}
               </select>
@@ -2629,7 +2727,7 @@ function renderLogBody() {
         if ([FIELD.critical, FIELD.delivered].includes(header)) {
           return `
             <td class="checkbox-cell" data-cell-column="${escapeHtml(header)}" style="${columnStyle(header)}">
-              <input type="checkbox" data-checkbox-row="${escapeHtml(key)}" data-checkbox-column="${escapeHtml(header)}" data-log-field-row="${escapeHtml(key)}" data-log-field-column="${escapeHtml(header)}" ${row[header] ? "checked" : ""} aria-label="${escapeHtml(header)}" />
+              <input type="checkbox" data-checkbox-row="${escapeHtml(key)}" data-checkbox-column="${escapeHtml(header)}" data-log-field-row="${escapeHtml(key)}" data-log-field-column="${escapeHtml(header)}" ${row[header] ? "checked" : ""} aria-label="${escapeHtml(header)}" ${disabled} />
             </td>
           `;
         }
@@ -2642,7 +2740,7 @@ function renderLogBody() {
         if (header === FIELD.notes) {
           return renderNotesCell(row, header);
         }
-        return `<td class="editable-cell ${dateConflict(row, header) ? "date-conflict" : ""}" contenteditable="true" tabindex="0" data-cell-column="${escapeHtml(header)}" style="${columnStyle(header)}" data-edit-row="${escapeHtml(key)}" data-edit-column="${escapeHtml(header)}" data-log-field-row="${escapeHtml(key)}" data-log-field-column="${escapeHtml(header)}">${escapeHtml(editableValue(row, header))}</td>`;
+        return `<td class="editable-cell ${dateConflict(row, header) ? "date-conflict" : ""}" contenteditable="${editableAttribute}" tabindex="${editableTabIndex}" aria-readonly="${editingEnabled ? "false" : "true"}" data-cell-column="${escapeHtml(header)}" style="${columnStyle(header)}" data-edit-row="${escapeHtml(key)}" data-edit-column="${escapeHtml(header)}" data-log-field-row="${escapeHtml(key)}" data-log-field-column="${escapeHtml(header)}">${escapeHtml(editableValue(row, header))}</td>`;
       }).join("")}
     </tr>
   `).join("");
@@ -2654,6 +2752,7 @@ function renderLogBody() {
   bindNoteButtons();
   bindInsertButtons();
   bindRemoveButtons();
+  updateSharedEditingControls();
   syncTopScrollbarWidth();
 }
 
@@ -3003,6 +3102,7 @@ function printProviderReport() {
 }
 
 function renderDevelopmentNotes() {
+  const disabled = canEditSharedData() ? "" : "disabled";
   const notes = [...state.developmentNotes].sort((a, b) => {
     const statusOrder = { open: 0, implemented: 1, rejected: 2 };
     const statusA = statusOrder[a.status || "open"] ?? 0;
@@ -3026,9 +3126,9 @@ function renderDevelopmentNotes() {
         <p>${escapeHtml(note.text)}</p>
         ${resolved ? `<div class="meta">Updated: ${escapeHtml(resolved)}</div>` : ""}
         <div class="development-note-status-actions">
-          <button class="text-button neutral" type="button" data-note-status="implemented" data-note-id="${escapeHtml(note.id)}">Implemented</button>
-          <button class="text-button" type="button" data-note-status="rejected" data-note-id="${escapeHtml(note.id)}">Rejected</button>
-          ${status !== "open" ? `<button class="text-button neutral" type="button" data-note-status="open" data-note-id="${escapeHtml(note.id)}">Reopen</button>` : ""}
+          <button class="text-button neutral" type="button" data-note-status="implemented" data-note-id="${escapeHtml(note.id)}" ${disabled}>Implemented</button>
+          <button class="text-button" type="button" data-note-status="rejected" data-note-id="${escapeHtml(note.id)}" ${disabled}>Rejected</button>
+          ${status !== "open" ? `<button class="text-button neutral" type="button" data-note-status="open" data-note-id="${escapeHtml(note.id)}" ${disabled}>Reopen</button>` : ""}
         </div>
       </article>
     `;
@@ -3039,29 +3139,32 @@ function renderDevelopmentNotes() {
       updateDevelopmentNoteStatus(button.dataset.noteId, button.dataset.noteStatus);
     });
   });
+  updateSharedEditingControls();
 }
 
 function renderAdminList(target, listName, values) {
+  const disabled = canEditSharedData() ? "" : "disabled";
   target.innerHTML = values.map((value) => `
     <div class="admin-row">
       <span>${escapeHtml(value)}</span>
       <div class="admin-row-actions">
-        ${listName === "statuses" ? `<button class="text-button neutral" type="button" data-rename-status="${escapeHtml(value)}">Rename</button>` : ""}
-        <button class="text-button" type="button" data-remove-list="${listName}" data-remove-value="${escapeHtml(value)}">Remove</button>
+        ${listName === "statuses" ? `<button class="text-button neutral" type="button" data-rename-status="${escapeHtml(value)}" ${disabled}>Rename</button>` : ""}
+        <button class="text-button" type="button" data-remove-list="${listName}" data-remove-value="${escapeHtml(value)}" ${disabled}>Remove</button>
       </div>
     </div>
   `).join("") || `<p class="empty">No values yet.</p>`;
 }
 
 function renderProjectList() {
+  const disabled = canEditSharedData() ? "" : "disabled";
   els.projectCount.textContent = `${state.projects.length} projects`;
   els.projectList.innerHTML = state.projects.map((project) => `
     <div class="admin-row">
       <span>${escapeHtml(project.name)}${project.archived ? " (Archived)" : ""}</span>
       <div class="admin-row-actions">
         ${project.archived
-          ? `<button class="text-button neutral" type="button" data-restore-project="${escapeHtml(project.id)}">Restore</button>`
-          : `<button class="text-button" type="button" data-archive-project="${escapeHtml(project.id)}">Archive</button>`}
+          ? `<button class="text-button neutral" type="button" data-restore-project="${escapeHtml(project.id)}" ${disabled}>Restore</button>`
+          : `<button class="text-button" type="button" data-archive-project="${escapeHtml(project.id)}" ${disabled}>Archive</button>`}
       </div>
     </div>
   `).join("");
@@ -3094,6 +3197,7 @@ function renderAdmin() {
       renameStatus(button.dataset.renameStatus);
     });
   });
+  updateSharedEditingControls();
 }
 
 function render() {
@@ -3103,6 +3207,7 @@ function render() {
   renderProviderReport();
   renderDevelopmentNotes();
   renderAdmin();
+  updateSharedEditingControls();
 }
 
 function setSidebarHidden(hidden) {
