@@ -621,7 +621,7 @@ function collectLocalStorageSharedState() {
   if (!adminLists) {
     const allRows = Object.values(rowsByProject).flat();
     adminLists = {
-      suppliers: uniqueSorted(allRows.map((row) => row[FIELD.provider])),
+      suppliers: cleanSupplierList(allRows.map((row) => row[FIELD.provider])),
       statuses: uniqueSorted(allRows.map((row) => row[FIELD.status])),
     };
   }
@@ -1535,9 +1535,26 @@ function uniqueSorted(values) {
     .sort((a, b) => a.localeCompare(b));
 }
 
+function isLikelyPartialSupplier(value, allValues) {
+  const text = clean(value);
+  if (text.length < 4) return false;
+  const normalized = normalizeKey(text);
+  return allValues.some((candidate) => {
+    const candidateText = clean(candidate);
+    const candidateNormalized = normalizeKey(candidateText);
+    return candidateNormalized.length >= normalized.length + 2
+      && candidateNormalized.startsWith(normalized);
+  });
+}
+
+function cleanSupplierList(values) {
+  const suppliers = uniqueSorted(values);
+  return suppliers.filter((supplier) => !isLikelyPartialSupplier(supplier, suppliers));
+}
+
 function seedAdminLists() {
   state.adminLists = {
-    suppliers: uniqueSorted(state.rows.map((row) => row[FIELD.provider])),
+    suppliers: cleanSupplierList(state.rows.map((row) => row[FIELD.provider])),
     statuses: uniqueSorted(state.rows.map((row) => row[FIELD.status])),
   };
 }
@@ -1545,7 +1562,7 @@ function seedAdminLists() {
 function loadAdminLists() {
   if (state.adminListsLoadedFromCloud) {
     state.adminLists = {
-      suppliers: uniqueSorted(state.adminLists.suppliers || []),
+      suppliers: cleanSupplierList(state.adminLists.suppliers || []),
       statuses: uniqueSorted(state.adminLists.statuses || []),
     };
     return;
@@ -1553,7 +1570,7 @@ function loadAdminLists() {
   seedAdminLists();
   try {
     const saved = JSON.parse(localStorage.getItem(ADMIN_PREF_KEY) || "{}");
-    state.adminLists.suppliers = uniqueSorted([...(state.adminLists.suppliers || []), ...(saved.suppliers || [])]);
+    state.adminLists.suppliers = cleanSupplierList([...(state.adminLists.suppliers || []), ...(saved.suppliers || [])]);
     state.adminLists.statuses = uniqueSorted([...(state.adminLists.statuses || []), ...(saved.statuses || [])]);
   } catch {
     localStorage.removeItem(ADMIN_PREF_KEY);
@@ -1569,7 +1586,8 @@ function addAdminValue(listName, value, rerender = true) {
   if (!requireSharedEditing()) return;
   const text = clean(value);
   if (!text) return;
-  state.adminLists[listName] = uniqueSorted([...(state.adminLists[listName] || []), text]);
+  const values = [...(state.adminLists[listName] || []), text];
+  state.adminLists[listName] = listName === "suppliers" ? cleanSupplierList(values) : uniqueSorted(values);
   saveAdminLists();
   if (rerender) {
     renderAdmin();
@@ -1666,7 +1684,7 @@ function populateSelect(select, label, rows, field) {
 function populateGlobalFilters() {
   const statusRows = uniqueSorted([...state.adminLists.statuses, ...state.rows.map((row) => row[FIELD.status])])
     .map((status) => ({ [FIELD.status]: status }));
-  const providerRows = uniqueSorted([...state.adminLists.suppliers, ...state.rows.map((row) => row[FIELD.provider])])
+  const providerRows = cleanSupplierList([...state.adminLists.suppliers, ...state.rows.map((row) => row[FIELD.provider])])
     .map((provider) => ({ [FIELD.provider]: provider }));
   populateSelect(els.status, "statuses", statusRows, FIELD.status);
   populateSelect(els.area, "areas", state.rows, FIELD.area);
