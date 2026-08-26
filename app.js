@@ -1552,6 +1552,14 @@ function cleanSupplierList(values) {
   return suppliers.filter((supplier) => !isLikelyPartialSupplier(supplier, suppliers));
 }
 
+function normalizeAdminLists() {
+  state.adminLists = {
+    suppliers: cleanSupplierList(state.adminLists.suppliers || []),
+    statuses: uniqueSorted(state.adminLists.statuses || []),
+  };
+  localStorage.setItem(ADMIN_PREF_KEY, JSON.stringify(state.adminLists));
+}
+
 function seedAdminLists() {
   state.adminLists = {
     suppliers: cleanSupplierList(state.rows.map((row) => row[FIELD.provider])),
@@ -1561,10 +1569,7 @@ function seedAdminLists() {
 
 function loadAdminLists() {
   if (state.adminListsLoadedFromCloud) {
-    state.adminLists = {
-      suppliers: cleanSupplierList(state.adminLists.suppliers || []),
-      statuses: uniqueSorted(state.adminLists.statuses || []),
-    };
+    normalizeAdminLists();
     return;
   }
   seedAdminLists();
@@ -1958,7 +1963,7 @@ function orderedLogHeaders() {
 }
 
 function columnOptions(header) {
-  if (header === FIELD.provider) return state.adminLists.suppliers;
+  if (header === FIELD.provider) return cleanSupplierList(state.adminLists.suppliers || []);
   if (header === FIELD.status) return state.adminLists.statuses;
   return [...new Set(state.rows.map((row) => clean(displayValue(row, header))).filter(Boolean))]
     .sort((a, b) => a.localeCompare(b));
