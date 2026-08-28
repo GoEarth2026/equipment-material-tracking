@@ -382,7 +382,7 @@ function updateSharedEditingControls() {
   });
 
   document.querySelectorAll(
-    "[data-edit-column], [data-status-row], [data-checkbox-row], [data-add-delivery-row], [data-edit-delivery-row], [data-remove-delivery-row], [data-add-note-row], [data-edit-note-row], [data-insert-row], [data-remove-row], [data-remove-list], [data-rename-status], [data-archive-project], [data-restore-project]",
+    "[data-edit-column], [data-provider-row], [data-status-row], [data-checkbox-row], [data-add-delivery-row], [data-edit-delivery-row], [data-remove-delivery-row], [data-add-note-row], [data-edit-note-row], [data-insert-row], [data-remove-row], [data-remove-list], [data-rename-status], [data-archive-project], [data-restore-project]",
   ).forEach((control) => {
     if (control.matches("[data-edit-column]")) {
       control.contentEditable = disabled ? "false" : "true";
@@ -1552,6 +1552,30 @@ function cleanSupplierList(values) {
   return suppliers.filter((supplier) => !isLikelyPartialSupplier(supplier, suppliers));
 }
 
+function supplierMatchKey(value) {
+  return normalizeKey(value)
+    .replace(/\bAND\b/g, "&")
+    .replace(/[^A-Z0-9&]+/g, " ")
+    .replace(/\s*&\s*/g, " & ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function canonicalSupplierName(value) {
+  const text = clean(value);
+  if (!text) return null;
+  const supplierKey = supplierMatchKey(text);
+  const exact = cleanSupplierList(state.adminLists.suppliers || [])
+    .find((supplier) => supplierMatchKey(supplier) === supplierKey);
+  if (exact) return exact;
+
+  const prefixMatches = cleanSupplierList(state.adminLists.suppliers || [])
+    .filter((supplier) => supplierMatchKey(supplier).startsWith(supplierKey));
+  if (prefixMatches.length === 1 && text.length >= 4) return prefixMatches[0];
+  if (prefixMatches.length > 1 && text.length >= 4) return undefined;
+  return text;
+}
+
 function normalizeAdminLists() {
   state.adminLists = {
     suppliers: cleanSupplierList(state.adminLists.suppliers || []),
@@ -2390,6 +2414,7 @@ function moveLogFieldWithArrow(event, rowKeyValue, header) {
 function bindLogFieldTabbing() {
   els.logBody.querySelectorAll("[data-log-field-row]").forEach((control) => {
     if (control.isContentEditable) return;
+    if (control.matches("[data-provider-row]")) return;
     control.addEventListener("keydown", (event) => {
       if (moveLogFieldWithArrow(event, control.dataset.logFieldRow, control.dataset.logFieldColumn)) return;
       if (event.key === "Tab") {
@@ -2480,6 +2505,54 @@ function bindStatusSelects() {
       renderDashboard();
       renderProcurement();
       populateGlobalFilters();
+    });
+  });
+}
+
+function saveProviderInput(input) {
+  if (!canEditSharedData()) return false;
+  const row = state.rows.find((candidate) => rowKey(candidate) === input.dataset.providerRow);
+  if (!row) return false;
+  const canonical = canonicalSupplierName(input.value);
+  if (canonical === undefined) {
+    input.value = editableValue(row, FIELD.provider);
+    alert("Please choose the matching provider from the dropdown list before saving.");
+    return false;
+  }
+  input.value = canonical || "";
+  saveCellEdit(row, FIELD.provider, canonical);
+  state.filtered = state.rows.filter(matchesFilters);
+  renderAdmin();
+  populateGlobalFilters();
+  renderColumnMenu();
+  renderLog();
+  renderDashboard();
+  renderProcurement();
+  return true;
+}
+
+function bindProviderInputs() {
+  els.logBody.querySelectorAll("[data-provider-row]").forEach((input) => {
+    input.addEventListener("change", () => {
+      saveProviderInput(input);
+    });
+
+    input.addEventListener("keydown", (event) => {
+      if (!canEditSharedData()) return;
+      if (event.key === "Enter") {
+        event.preventDefault();
+        input.blur();
+      }
+      if (event.key === "Tab") {
+        event.preventDefault();
+        const rowKeyValue = input.dataset.providerRow;
+        saveProviderInput(input);
+        focusAdjacentLogField(rowKeyValue, FIELD.provider, event.shiftKey ? -1 : 1);
+      }
+    });
+
+    input.addEventListener("blur", () => {
+      saveProviderInput(input);
     });
   });
 }
@@ -2639,6 +2712,24 @@ function bindNoteButtons() {
   });
 }
 
+function renderProviderCell(row, header = FIELD.provider) {
+  const key = rowKey(row);
+  const listId = `supplier-options-${escapeHtml(key).replace(/[^a-z0-9_-]+/gi, "-")}`;
+  const disabled = canEditSharedData() ? "" : "disabled";
+  const options = cleanSupplierList([
+    clean(row[FIELD.provider]),
+    ...(state.adminLists.suppliers || []),
+  ]);
+  return `
+    <td data-cell-column="${escapeHtml(header)}" style="${columnStyle(header)}">
+      <input class="cell-input provider-cell-input" list="${listId}" value="${escapeHtml(editableValue(row, header))}" data-provider-row="${escapeHtml(key)}" data-log-field-row="${escapeHtml(key)}" data-log-field-column="${escapeHtml(header)}" autocomplete="off" ${disabled} />
+      <datalist id="${listId}">
+        ${options.map((supplier) => `<option value="${escapeHtml(supplier)}"></option>`).join("")}
+      </datalist>
+    </td>
+  `;
+}
+
 function renderNotesCell(row, header = FIELD.notes) {
   const notes = parseNotes(row[FIELD.notes]);
   const key = rowKey(row);
@@ -2734,6 +2825,9 @@ function renderLogBody() {
             </td>
           `;
         }
+        if (header === FIELD.provider) {
+          return renderProviderCell(row, header);
+        }
         if ([FIELD.critical, FIELD.delivered].includes(header)) {
           return `
             <td class="checkbox-cell" data-cell-column="${escapeHtml(header)}" style="${columnStyle(header)}">
@@ -2756,6 +2850,7 @@ function renderLogBody() {
   `).join("");
   bindEditableCells();
   bindLogFieldTabbing();
+  bindProviderInputs();
   bindStatusSelects();
   bindLogCheckboxes();
   bindDeliveryButtons();
