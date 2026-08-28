@@ -307,6 +307,28 @@ function stripSharedBackups(sharedState = {}) {
   return withoutBackups;
 }
 
+function supplierSetFromSharedState(sharedState = {}) {
+  const suppliers = new Set();
+  Object.values(sharedState.rowsByProject || {}).forEach((rows) => {
+    (rows || []).forEach((row) => {
+      const supplier = clean(row?.[FIELD.provider]);
+      if (supplier) suppliers.add(supplier);
+    });
+  });
+  return suppliers;
+}
+
+function normalizeSharedStateForSave(sharedState = {}) {
+  const cleaned = stripSharedBackups(sharedState);
+  const protectedSuppliers = supplierSetFromSharedState(cleaned);
+  cleaned.adminLists = {
+    ...(cleaned.adminLists || {}),
+    suppliers: cleanSupplierList(cleaned.adminLists?.suppliers || [], protectedSuppliers),
+    statuses: uniqueSorted(cleaned.adminLists?.statuses || []),
+  };
+  return cleaned;
+}
+
 function isAddedRow(row) {
   return rowKey(row).startsWith("new-");
 }
@@ -446,7 +468,7 @@ async function loadSharedState() {
     if (error) throw error;
 
     if (data?.data) {
-      const shared = data.data;
+      const shared = normalizeSharedStateForSave(data.data);
       state.projects = Array.isArray(shared.projects) && shared.projects.length ? shared.projects : state.projects;
       state.rowsByProject = shared.rowsByProject || {};
       state.deletedRowsByProject = shared.deletedRowsByProject || {};
@@ -520,15 +542,17 @@ function queueSharedSave() {
 async function saveSharedState() {
   if (!state.supabaseClient) return;
   try {
-    const currentState = collectSharedState();
+    const currentState = normalizeSharedStateForSave(collectSharedState());
     const { data: existingData, error: readError } = await state.supabaseClient
       .from("equipment_material_app_state")
       .select("data")
       .eq("id", "main")
       .maybeSingle();
     if (readError) throw readError;
-    const existingState = existingData?.data ? stripSharedBackups(existingData.data) : null;
-    const mergedState = existingState ? mergeSharedState(currentState, existingState) : stripSharedBackups(currentState);
+    const existingState = existingData?.data ? normalizeSharedStateForSave(existingData.data) : null;
+    const mergedState = normalizeSharedStateForSave(
+      existingState ? mergeSharedState(currentState, existingState) : currentState,
+    );
     const { error } = await state.supabaseClient
       .from("equipment_material_app_state")
       .upsert({ id: "main", data: mergedState });
@@ -1535,21 +1559,28 @@ function uniqueSorted(values) {
     .sort((a, b) => a.localeCompare(b));
 }
 
-function isLikelyPartialSupplier(value, allValues) {
+function currentRowSupplierSet() {
+  return new Set(state.rows.map((row) => clean(row[FIELD.provider])).filter(Boolean));
+}
+
+function isLikelyPartialSupplier(value, allValues, protectedValues = new Set()) {
   const text = clean(value);
-  if (text.length < 4) return false;
+  if (!text || protectedValues.has(text)) return false;
+  if (text.length <= 2) return true;
+  if (/^[A-Z& ]{3,4}$/.test(text)) return true;
   const normalized = normalizeKey(text);
   return allValues.some((candidate) => {
     const candidateText = clean(candidate);
     const candidateNormalized = normalizeKey(candidateText);
+    if (candidateNormalized === normalized) return false;
     return candidateNormalized.length >= normalized.length + 2
       && candidateNormalized.startsWith(normalized);
   });
 }
 
-function cleanSupplierList(values) {
+function cleanSupplierList(values, protectedValues = currentRowSupplierSet()) {
   const suppliers = uniqueSorted(values);
-  return suppliers.filter((supplier) => !isLikelyPartialSupplier(supplier, suppliers));
+  return suppliers.filter((supplier) => !isLikelyPartialSupplier(supplier, suppliers, protectedValues));
 }
 
 function supplierMatchKey(value) {
@@ -1561,18 +1592,24 @@ function supplierMatchKey(value) {
     .trim();
 }
 
+function supplierCompactKey(value) {
+  return supplierMatchKey(value).replace(/[^A-Z0-9]+/g, "");
+}
+
 function canonicalSupplierName(value) {
   const text = clean(value);
   if (!text) return null;
   const supplierKey = supplierMatchKey(text);
-  const exact = cleanSupplierList(state.adminLists.suppliers || [])
-    .find((supplier) => supplierMatchKey(supplier) === supplierKey);
+  const compactKey = supplierCompactKey(text);
+  const suppliers = cleanSupplierList(state.adminLists.suppliers || []);
+  const exact = suppliers
+    .find((supplier) => supplierMatchKey(supplier) === supplierKey || supplierCompactKey(supplier) === compactKey);
   if (exact) return exact;
 
-  const prefixMatches = cleanSupplierList(state.adminLists.suppliers || [])
-    .filter((supplier) => supplierMatchKey(supplier).startsWith(supplierKey));
-  if (prefixMatches.length === 1 && text.length >= 4) return prefixMatches[0];
-  if (prefixMatches.length > 1 && text.length >= 4) return undefined;
+  const prefixMatches = suppliers
+    .filter((supplier) => supplierMatchKey(supplier).startsWith(supplierKey) || supplierCompactKey(supplier).startsWith(compactKey));
+  if (prefixMatches.length === 1 && text.length >= 3) return prefixMatches[0];
+  if (prefixMatches.length > 1 && text.length >= 3) return undefined;
   return text;
 }
 
