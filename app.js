@@ -55,6 +55,7 @@ const state = {
   },
   developmentNotes: [],
   userInitials: "",
+  selectedImportFile: null,
   supabaseClient: null,
   cloudReady: false,
   cloudSaveTimer: null,
@@ -169,6 +170,8 @@ const els = {
   importProject: document.querySelector("#importProjectSelect"),
   importMode: document.querySelector("#importMode"),
   importFile: document.querySelector("#importFileInput"),
+  importDropZone: document.querySelector("#importDropZone"),
+  importFileName: document.querySelector("#importFileName"),
   importLog: document.querySelector("#importLogButton"),
   importStatus: document.querySelector("#importStatus"),
   deliveryDialog: document.querySelector("#deliveryDialog"),
@@ -1472,6 +1475,29 @@ async function parseImportFile(file) {
     : parseDelimited(text, extension === "csv" ? "," : "\t");
 }
 
+function isSupportedImportFile(file) {
+  const extension = clean(file?.name).split(".").pop().toLowerCase();
+  return ["xlsx", "xlsm", "xls", "xml", "csv", "tsv", "txt"].includes(extension);
+}
+
+function setSelectedImportFile(file) {
+  if (!file) {
+    state.selectedImportFile = null;
+    if (els.importFileName) els.importFileName.textContent = "No file selected";
+    return;
+  }
+  if (!isSupportedImportFile(file)) {
+    state.selectedImportFile = null;
+    if (els.importFile) els.importFile.value = "";
+    if (els.importFileName) els.importFileName.textContent = "Unsupported file type";
+    els.importStatus.textContent = "Choose an Excel, CSV, TSV, XML, or text file";
+    return;
+  }
+  state.selectedImportFile = file;
+  if (els.importFileName) els.importFileName.textContent = file.name;
+  els.importStatus.textContent = `Ready to import ${file.name}`;
+}
+
 function importedValue(header, value) {
   const text = clean(value);
   if ([FIELD.qtyDelivered, FIELD.deliveries].includes(header)) return null;
@@ -1512,7 +1538,7 @@ function rowsFromImportGrid(grid) {
 
 async function importMaterialLog() {
   if (!requireSharedEditing()) return;
-  const file = els.importFile.files?.[0];
+  const file = state.selectedImportFile || els.importFile.files?.[0];
   if (!file) {
     els.importStatus.textContent = "Choose a file first";
     return;
@@ -1555,6 +1581,7 @@ async function importMaterialLog() {
   setView("log");
   els.importStatus.textContent = `${rows.length} item(s) imported to ${targetProject.name}`;
   els.importFile.value = "";
+  setSelectedImportFile(null);
 }
 
 function ensureUserInitials() {
@@ -3606,6 +3633,43 @@ async function init() {
   els.exportProviderReport.addEventListener("click", exportProviderReport);
 
   els.downloadTemplate.addEventListener("click", downloadImportTemplate);
+
+  els.importFile.addEventListener("change", () => {
+    setSelectedImportFile(els.importFile.files?.[0] || null);
+  });
+
+  els.importDropZone.addEventListener("click", () => {
+    if (!canEditSharedData()) return;
+    els.importFile.click();
+  });
+
+  els.importDropZone.addEventListener("keydown", (event) => {
+    if (!["Enter", " "].includes(event.key)) return;
+    event.preventDefault();
+    if (!canEditSharedData()) return;
+    els.importFile.click();
+  });
+
+  ["dragenter", "dragover"].forEach((eventName) => {
+    els.importDropZone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      if (!canEditSharedData()) return;
+      els.importDropZone.classList.add("is-drag-over");
+      event.dataTransfer.dropEffect = "copy";
+    });
+  });
+
+  ["dragleave", "drop"].forEach((eventName) => {
+    els.importDropZone.addEventListener(eventName, () => {
+      els.importDropZone.classList.remove("is-drag-over");
+    });
+  });
+
+  els.importDropZone.addEventListener("drop", (event) => {
+    event.preventDefault();
+    if (!canEditSharedData()) return;
+    setSelectedImportFile(event.dataTransfer.files?.[0] || null);
+  });
 
   els.importLog.addEventListener("click", importMaterialLog);
 

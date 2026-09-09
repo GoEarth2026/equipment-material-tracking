@@ -1177,6 +1177,51 @@ tr:hover td {
   gap: 12px;
 }
 
+.import-drop-zone {
+  display: grid;
+  place-items: center;
+  gap: 4px;
+  min-height: 112px;
+  border: 2px dashed #b9c6c1;
+  border-radius: 8px;
+  background: #f9fbfa;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 16px;
+  text-align: center;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.import-drop-zone strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.import-drop-zone span,
+.import-drop-zone small {
+  font-size: 12px;
+}
+
+.import-drop-zone small {
+  color: var(--accent-2);
+  font-weight: 700;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.import-drop-zone.is-drag-over,
+.import-drop-zone:focus-visible {
+  background: #edf6f2;
+  border-color: var(--accent);
+  color: var(--ink);
+  outline: none;
+}
+
+.is-shared-readonly .import-drop-zone {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
 .admin-setting {
   display: grid;
   gap: 5px;

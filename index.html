@@ -224,6 +224,11 @@
                   Import File
                   <input id="importFileInput" type="file" accept=".xlsx,.xlsm,.xls,.xml,.csv,.tsv,.txt" />
                 </label>
+                <div class="import-drop-zone" id="importDropZone" role="button" tabindex="0">
+                  <strong>Drop import file here</strong>
+                  <span>or choose a file above</span>
+                  <small id="importFileName">No file selected</small>
+                </div>
                 <button class="ghost-button" id="importLogButton" type="button">Import Log</button>
               </div>
             </section>
@@ -282,6 +287,6 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="./supabase-config.js"></script>
-    <script src="./app.js?v=import-target1"></script>
+    <script src="./app.js?v=import-drop1"></script>
   </body>
 </html>
