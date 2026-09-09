@@ -2321,6 +2321,11 @@ function saveColumnLayoutPrefs() {
   localStorage.setItem(COLUMN_WIDTH_PREF_KEY, JSON.stringify(state.columnWidths));
 }
 
+function keepColumnMenuOpen() {
+  els.columnMenu.hidden = false;
+  els.columnToggle.setAttribute("aria-expanded", "true");
+}
+
 function moveColumn(sourceHeader, targetHeader) {
   if (!sourceHeader || !targetHeader || sourceHeader === targetHeader) return;
   const headers = orderedLogHeaders();
@@ -2333,6 +2338,7 @@ function moveColumn(sourceHeader, targetHeader) {
   saveColumnLayoutPrefs();
   renderLog();
   renderColumnMenu();
+  keepColumnMenuOpen();
 }
 
 function moveColumnByStep(header, direction) {
@@ -2345,6 +2351,27 @@ function moveColumnByStep(header, direction) {
   saveColumnLayoutPrefs();
   renderLog();
   renderColumnMenu();
+  keepColumnMenuOpen();
+}
+
+function moveColumnBefore(sourceHeader, targetHeader) {
+  if (!sourceHeader) return;
+  if (sourceHeader === targetHeader) return;
+  const headers = orderedLogHeaders();
+  const sourceIndex = headers.indexOf(sourceHeader);
+  if (sourceIndex === -1) return;
+  headers.splice(sourceIndex, 1);
+  if (targetHeader === "__end") {
+    headers.push(sourceHeader);
+  } else {
+    const targetIndex = headers.indexOf(targetHeader);
+    headers.splice(targetIndex === -1 ? headers.length : targetIndex, 0, sourceHeader);
+  }
+  state.columnOrder = headers;
+  saveColumnLayoutPrefs();
+  renderLog();
+  renderColumnMenu();
+  keepColumnMenuOpen();
 }
 
 function bindColumnDragAndResize() {
@@ -3218,6 +3245,7 @@ function resetColumnLayout() {
   localStorage.removeItem(COLUMN_WIDTH_PREF_KEY);
   renderColumnMenu();
   renderLog();
+  keepColumnMenuOpen();
 }
 
 function renderColumnMenu() {
@@ -3228,6 +3256,22 @@ function renderColumnMenu() {
       <button id="showAllColumns" type="button">Show all</button>
       <button id="resetColumnLayout" type="button">Reset layout</button>
     </header>
+    <section class="column-arrange-panel">
+      <label>
+        Move Column
+        <select id="moveColumnSelect">
+          ${headers.map((header) => `<option value="${escapeHtml(header)}">${escapeHtml(header)}</option>`).join("")}
+        </select>
+      </label>
+      <label>
+        Place Before
+        <select id="moveColumnBeforeSelect">
+          ${headers.map((header) => `<option value="${escapeHtml(header)}">${escapeHtml(header)}</option>`).join("")}
+          <option value="__end">End of table</option>
+        </select>
+      </label>
+      <button id="moveColumnDirect" type="button">Move</button>
+    </section>
     ${headers.map((header, index) => `
       <div class="column-option">
         <label>
@@ -3251,6 +3295,7 @@ function renderColumnMenu() {
       }
       saveColumnPrefs();
       render();
+      keepColumnMenuOpen();
     });
   });
 
@@ -3259,9 +3304,17 @@ function renderColumnMenu() {
     saveColumnPrefs();
     renderColumnMenu();
     render();
+    keepColumnMenuOpen();
   });
 
   els.columnMenu.querySelector("#resetColumnLayout").addEventListener("click", resetColumnLayout);
+
+  els.columnMenu.querySelector("#moveColumnDirect").addEventListener("click", () => {
+    moveColumnBefore(
+      els.columnMenu.querySelector("#moveColumnSelect").value,
+      els.columnMenu.querySelector("#moveColumnBeforeSelect").value,
+    );
+  });
 
   els.columnMenu.querySelectorAll("[data-move-column]").forEach((button) => {
     button.addEventListener("click", () => {
