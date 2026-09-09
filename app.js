@@ -18,6 +18,7 @@ const FIELD = {
   room: "ROOM",
   system: "SYSTEM",
   submittal: "SUBMITTAL #",
+  dateSubmitted: "DATE SUBMITTED",
   status: "SUBMITTAL STATUS",
   released: "DATE RELEASED",
   lead: "LEAD TIME (DAYS)",
@@ -872,7 +873,7 @@ function editableValue(row, header) {
 function normalizeEditedValue(header, value) {
   const text = clean(value);
   if (!text) return [FIELD.critical, FIELD.delivered].includes(header) ? false : null;
-  if ([FIELD.released, FIELD.delivery, FIELD.required].includes(header)) {
+  if ([FIELD.dateSubmitted, FIELD.released, FIELD.delivery, FIELD.required].includes(header)) {
     return excelSerialFromDate(text);
   }
   if (header === FIELD.lead) {
@@ -905,6 +906,7 @@ function shouldAutosaveTextInput(header) {
     FIELD.quantity,
     FIELD.unitPricePo,
     FIELD.qtyDelivered,
+    FIELD.dateSubmitted,
     FIELD.released,
     FIELD.lead,
     FIELD.delivery,
@@ -1233,7 +1235,7 @@ function exportValue(row, header) {
   if (header === FIELD.deliveries) return deliveriesForExport(row);
   if ([FIELD.critical, FIELD.delivered].includes(header)) return row[header] ? "Yes" : "No";
   if (header === FIELD.notes) return notesForExport(row[FIELD.notes]);
-  if ([FIELD.released, FIELD.delivery, FIELD.required].includes(header)) return excelDate(row[header]) || "";
+  if ([FIELD.dateSubmitted, FIELD.released, FIELD.delivery, FIELD.required].includes(header)) return excelDate(row[header]) || "";
   if (header === FIELD.system) return displayValue(row, header);
   return row[header] ?? "";
 }
@@ -2123,7 +2125,7 @@ function renderTable(head, body, rows, headers, raw = false) {
     <tr>
       ${visibleHeaders.map((header) => {
         const value = raw ? row[header] : row[header];
-        const isDate = [FIELD.released, FIELD.delivery, FIELD.required].includes(header);
+        const isDate = [FIELD.dateSubmitted, FIELD.released, FIELD.delivery, FIELD.required].includes(header);
         const display = isDate ? excelDate(value) : value;
         const dateConflict = numeric(row[FIELD.delivery]) !== null
           && numeric(row[FIELD.required]) !== null
@@ -2145,14 +2147,14 @@ function displayValue(row, header) {
   if (header === FIELD.deliveries) return deliveriesForExport(row);
   if (header === FIELD.critical) return value ? "Critical" : "";
   if (header === FIELD.delivered) return value ? "Delivered" : "";
-  return [FIELD.released, FIELD.delivery, FIELD.required].includes(header) ? excelDate(value) : value;
+  return [FIELD.dateSubmitted, FIELD.released, FIELD.delivery, FIELD.required].includes(header) ? excelDate(value) : value;
 }
 
 function sortValue(row, header) {
   if (header === FIELD.qtyDelivered) return quantityDelivered(row);
   if (header === FIELD.critical) return row[FIELD.critical] ? 1 : 0;
   if (header === FIELD.delivered) return row[FIELD.delivered] ? 1 : 0;
-  if ([FIELD.quantity, FIELD.unitPricePo, FIELD.released, FIELD.delivery, FIELD.required, FIELD.lead, FIELD.remaining].includes(header)) {
+  if ([FIELD.quantity, FIELD.unitPricePo, FIELD.dateSubmitted, FIELD.released, FIELD.delivery, FIELD.required, FIELD.lead, FIELD.remaining].includes(header)) {
     const value = numeric(row[header]);
     return value === null ? Number.POSITIVE_INFINITY : value;
   }
@@ -2167,7 +2169,7 @@ function dateConflict(row, header) {
 }
 
 function logHeaders() {
-  return [FIELD.drawing, FIELD.tag, FIELD.pipeCategory, FIELD.category, FIELD.type, FIELD.endConnection, FIELD.item, FIELD.quantity, FIELD.units, FIELD.unitPricePo, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.submittal, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
+  return [FIELD.drawing, FIELD.tag, FIELD.pipeCategory, FIELD.category, FIELD.type, FIELD.endConnection, FIELD.item, FIELD.quantity, FIELD.units, FIELD.unitPricePo, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.submittal, FIELD.dateSubmitted, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
 }
 
 function orderedLogHeaders() {
@@ -3202,7 +3204,7 @@ function bindRemoveButtons() {
 }
 
 function allTableHeaders() {
-  return [FIELD.drawing, FIELD.tag, FIELD.pipeCategory, FIELD.category, FIELD.type, FIELD.endConnection, FIELD.item, FIELD.quantity, FIELD.units, FIELD.unitPricePo, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.submittal, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
+  return [FIELD.drawing, FIELD.tag, FIELD.pipeCategory, FIELD.category, FIELD.type, FIELD.endConnection, FIELD.item, FIELD.quantity, FIELD.units, FIELD.unitPricePo, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.submittal, FIELD.dateSubmitted, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
 }
 
 function saveColumnPrefs() {
