@@ -301,6 +301,60 @@ function mergeRowsPreservingMissingFields(currentRows = [], existingRows = [], d
   return mergedRows;
 }
 
+function projectNameFromId(projectId) {
+  return clean(projectId)
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.length <= 3 ? part.toUpperCase() : part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ") || "Recovered Project";
+}
+
+function normalizeProject(project) {
+  const id = clean(project?.id);
+  if (!id) return null;
+  return {
+    id,
+    name: clean(project?.name) || projectNameFromId(id),
+    archived: Boolean(project?.archived),
+    baseline: Boolean(project?.baseline || id === "hampton-wwtp-phase-ii"),
+  };
+}
+
+function projectsWithStoredRows(projects = [], rowsByProject = {}) {
+  const projectMap = new Map();
+  projects.map(normalizeProject).filter(Boolean).forEach((project) => {
+    projectMap.set(project.id, project);
+  });
+  if (!projectMap.size) {
+    defaultProjects().forEach((project) => projectMap.set(project.id, project));
+  }
+  Object.keys(rowsByProject || {}).forEach((projectId) => {
+    if (!projectMap.has(projectId)) {
+      projectMap.set(projectId, {
+        id: projectId,
+        name: projectNameFromId(projectId),
+        archived: false,
+        baseline: projectId === "hampton-wwtp-phase-ii",
+      });
+    }
+  });
+  return [...projectMap.values()];
+}
+
+function mergeProjectsPreservingExisting(currentProjects = [], existingProjects = [], rowsByProject = {}) {
+  const projectMap = new Map();
+  existingProjects.map(normalizeProject).filter(Boolean).forEach((project) => {
+    projectMap.set(project.id, project);
+  });
+  currentProjects.map(normalizeProject).filter(Boolean).forEach((project) => {
+    projectMap.set(project.id, {
+      ...(projectMap.get(project.id) || {}),
+      ...project,
+    });
+  });
+  return projectsWithStoredRows([...projectMap.values()], rowsByProject);
+}
+
 function mergeSharedState(currentState, existingState = {}) {
   const existingRowsByProject = existingState.rowsByProject || {};
   const currentDeleted = currentState.deletedRowsByProject || {};
@@ -326,6 +380,7 @@ function mergeSharedState(currentState, existingState = {}) {
   return {
     ...existingState,
     ...currentState,
+    projects: mergeProjectsPreservingExisting(currentState.projects, existingState.projects, mergedRowsByProject),
     rowsByProject: mergedRowsByProject,
     deletedRowsByProject,
   };
@@ -349,6 +404,10 @@ function supplierSetFromSharedState(sharedState = {}) {
 
 function normalizeSharedStateForSave(sharedState = {}) {
   const cleaned = stripSharedBackups(sharedState);
+  cleaned.projects = projectsWithStoredRows(
+    Array.isArray(cleaned.projects) ? cleaned.projects : [],
+    cleaned.rowsByProject || {},
+  );
   const protectedSuppliers = supplierSetFromSharedState(cleaned);
   cleaned.adminLists = {
     ...(cleaned.adminLists || {}),
@@ -591,7 +650,9 @@ async function saveSharedState() {
       .from("equipment_material_app_state")
       .upsert({ id: "main", data: mergedState });
     if (error) throw error;
+    state.projects = mergedState.projects || state.projects;
     state.rowsByProject = mergedState.rowsByProject || state.rowsByProject;
+    state.deletedRowsByProject = mergedState.deletedRowsByProject || state.deletedRowsByProject;
     setSyncStatus("Shared database saved", "cloud");
   } catch (error) {
     console.error(error);
