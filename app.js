@@ -1235,6 +1235,7 @@ function exportValue(row, header) {
   if (header === FIELD.deliveries) return deliveriesForExport(row);
   if ([FIELD.critical, FIELD.delivered].includes(header)) return row[header] ? "Yes" : "No";
   if (header === FIELD.notes) return notesForExport(row[FIELD.notes]);
+  if (header === FIELD.unitPricePo) return formattedDeliveryMoney(row[header]);
   if ([FIELD.dateSubmitted, FIELD.released, FIELD.delivery, FIELD.required].includes(header)) return excelDate(row[header]) || "";
   if (header === FIELD.system) return displayValue(row, header);
   return row[header] ?? "";
@@ -2147,6 +2148,7 @@ function displayValue(row, header) {
   if (header === FIELD.deliveries) return deliveriesForExport(row);
   if (header === FIELD.critical) return value ? "Critical" : "";
   if (header === FIELD.delivered) return value ? "Delivered" : "";
+  if (header === FIELD.unitPricePo) return clean(value) ? formattedDeliveryMoney(value) : "";
   return [FIELD.dateSubmitted, FIELD.released, FIELD.delivery, FIELD.required].includes(header) ? excelDate(value) : value;
 }
 
