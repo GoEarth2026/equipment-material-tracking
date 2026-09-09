@@ -166,6 +166,7 @@ const els = {
   statusAdminList: document.querySelector("#statusAdminList"),
   statusAdminCount: document.querySelector("#statusAdminCount"),
   downloadTemplate: document.querySelector("#downloadTemplateButton"),
+  importProject: document.querySelector("#importProjectSelect"),
   importMode: document.querySelector("#importMode"),
   importFile: document.querySelector("#importFileInput"),
   importLog: document.querySelector("#importLogButton"),
@@ -383,6 +384,7 @@ function updateSharedEditingControls() {
     els.supplierInput,
     els.statusAdminInput,
     els.importFile,
+    els.importProject,
     els.importMode,
     els.developmentNoteInput,
     els.developmentNoteInitials,
@@ -1003,6 +1005,20 @@ function populateProjectSelect() {
   els.projectSelect.innerHTML = activeProjects.map((project) => (
     `<option value="${escapeHtml(project.id)}" ${project.id === state.activeProjectId ? "selected" : ""}>${escapeHtml(project.name)}${project.archived ? " (Archived)" : ""}</option>`
   )).join("");
+  populateImportProjectSelect();
+}
+
+function populateImportProjectSelect() {
+  if (!els.importProject) return;
+  const currentValue = els.importProject.value || state.activeProjectId;
+  els.importProject.innerHTML = state.projects.map((project) => (
+    `<option value="${escapeHtml(project.id)}" ${project.archived ? "disabled" : ""} ${project.id === currentValue ? "selected" : ""}>${escapeHtml(project.name)}${project.archived ? " (Archived)" : ""}</option>`
+  )).join("");
+  if (!state.projects.some((project) => project.id === els.importProject.value && !project.archived)) {
+    els.importProject.value = activeProject()?.archived
+      ? state.projects.find((project) => !project.archived)?.id || ""
+      : state.activeProjectId;
+  }
 }
 
 function saveAddedItems() {
@@ -1501,6 +1517,12 @@ async function importMaterialLog() {
     els.importStatus.textContent = "Choose a file first";
     return;
   }
+  const targetProjectId = els.importProject.value || state.activeProjectId;
+  const targetProject = state.projects.find((project) => project.id === targetProjectId);
+  if (!targetProject || targetProject.archived) {
+    els.importStatus.textContent = "Choose an active project";
+    return;
+  }
 
   let rows = [];
   try {
@@ -1515,10 +1537,13 @@ async function importMaterialLog() {
     return;
   }
 
-  if (els.importMode.value === "replace" && !confirm(`Replace the current project log with ${rows.length} imported item(s)?`)) {
+  if (els.importMode.value === "replace" && !confirm(`Replace ${targetProject.name} with ${rows.length} imported item(s)?`)) {
     return;
   }
 
+  if (targetProject.id !== state.activeProjectId) {
+    loadProject(targetProject.id);
+  }
   state.rows = els.importMode.value === "replace" ? rows : [...state.rows, ...rows];
   state.filtered = state.rows.filter(matchesFilters);
   saveCurrentProjectRows();
@@ -1528,7 +1553,7 @@ async function importMaterialLog() {
   renderColumnMenu();
   render();
   setView("log");
-  els.importStatus.textContent = `${rows.length} item(s) imported`;
+  els.importStatus.textContent = `${rows.length} item(s) imported to ${targetProject.name}`;
   els.importFile.value = "";
 }
 
