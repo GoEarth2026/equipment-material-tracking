@@ -66,7 +66,7 @@ const state = {
   },
 };
 
-const VALID_VIEWS = new Set(["dashboard", "log", "procurement", "reports", "development", "admin"]);
+const VALID_VIEWS = new Set(["dashboard", "log", "procurement", "reports", "import", "development", "admin"]);
 const ACTION_COLUMN_WIDTH = 82;
 const DEFAULT_COLUMN_WIDTH = 150;
 const MIN_COLUMN_WIDTH = 80;
@@ -3511,6 +3511,7 @@ function setView(view) {
     log: "Material Log",
     procurement: "Procurement",
     reports: "Reports",
+    import: "Import Log",
     development: "Development Notes",
     admin: "Admin",
   }[view];
@@ -3519,7 +3520,7 @@ function setView(view) {
   if (els.tableScrollTop) {
     els.tableScrollTop.style.display = showColumnControls ? "block" : "none";
   }
-  document.querySelector(".filters").style.display = ["admin", "development", "reports"].includes(view) ? "none" : "grid";
+  document.querySelector(".filters").style.display = ["admin", "development", "reports", "import"].includes(view) ? "none" : "grid";
   if (!showColumnControls) {
     els.columnMenu.hidden = true;
     els.columnToggle.setAttribute("aria-expanded", "false");

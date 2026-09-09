@@ -22,6 +22,7 @@
           <button class="nav-tab" data-view="log" type="button">Material Log</button>
           <button class="nav-tab" data-view="procurement" type="button">Procurement</button>
           <button class="nav-tab" data-view="reports" type="button">Reports</button>
+          <button class="nav-tab" data-view="import" type="button">Import Log</button>
           <button class="nav-tab" data-view="development" type="button">Development Notes</button>
           <button class="nav-tab" data-view="admin" type="button">Admin</button>
         </nav>
@@ -160,6 +161,39 @@
           </div>
         </section>
 
+        <section class="view" id="importView">
+          <section class="panel admin-panel">
+            <div class="section-heading">
+              <h3>Import Log</h3>
+              <span id="importStatus">Template ready</span>
+            </div>
+            <div class="admin-import-actions">
+              <button class="ghost-button" id="downloadTemplateButton" type="button">Download Excel Template</button>
+              <label class="admin-setting">
+                Import To Project
+                <select id="importProjectSelect"></select>
+              </label>
+              <label class="admin-setting">
+                Import Mode
+                <select id="importMode">
+                  <option value="append">Append to selected project</option>
+                  <option value="replace">Replace selected project log</option>
+                </select>
+              </label>
+              <label class="admin-setting">
+                Import File
+                <input id="importFileInput" type="file" accept=".xlsx,.xlsm,.xls,.xml,.csv,.tsv,.txt" />
+              </label>
+              <div class="import-drop-zone" id="importDropZone" role="button" tabindex="0">
+                <strong>Drop import file here</strong>
+                <span>or choose a file above</span>
+                <small id="importFileName">No file selected</small>
+              </div>
+              <button class="ghost-button" id="importLogButton" type="button">Import Log</button>
+            </div>
+          </section>
+        </section>
+
         <section class="view" id="adminView">
           <div class="admin-grid">
             <section class="panel admin-panel">
@@ -200,37 +234,6 @@
                 <button class="ghost-button" type="submit">Add</button>
               </form>
               <div class="admin-list" id="statusAdminList"></div>
-            </section>
-
-            <section class="panel admin-panel">
-              <div class="section-heading">
-                <h3>Import Log</h3>
-                <span id="importStatus">Template ready</span>
-              </div>
-              <div class="admin-import-actions">
-                <button class="ghost-button" id="downloadTemplateButton" type="button">Download Excel Template</button>
-                <label class="admin-setting">
-                  Import To Project
-                  <select id="importProjectSelect"></select>
-                </label>
-                <label class="admin-setting">
-                  Import Mode
-                  <select id="importMode">
-                    <option value="append">Append to selected project</option>
-                    <option value="replace">Replace selected project log</option>
-                  </select>
-                </label>
-                <label class="admin-setting">
-                  Import File
-                  <input id="importFileInput" type="file" accept=".xlsx,.xlsm,.xls,.xml,.csv,.tsv,.txt" />
-                </label>
-                <div class="import-drop-zone" id="importDropZone" role="button" tabindex="0">
-                  <strong>Drop import file here</strong>
-                  <span>or choose a file above</span>
-                  <small id="importFileName">No file selected</small>
-                </div>
-                <button class="ghost-button" id="importLogButton" type="button">Import Log</button>
-              </div>
             </section>
           </div>
         </section>
@@ -287,6 +290,6 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="./supabase-config.js"></script>
-    <script src="./app.js?v=import-drop1"></script>
+    <script src="./app.js?v=import-menu1"></script>
   </body>
 </html>
