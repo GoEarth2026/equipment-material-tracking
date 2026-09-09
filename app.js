@@ -3,12 +3,14 @@ const DATA_URL = "./workbook-data.json";
 const FIELD = {
   drawing: "DRAWING #",
   tag: "TAG #",
+  pipeCategory: "PIPE CATEGORY",
   category: "CATEGORY",
   type: "TYPE",
   endConnection: "END CONNECTION",
   item: "ITEM DESCRIPTION",
   quantity: "QUANTITY",
   units: "UNITS",
+  unitPricePo: "UNIT PRICE - PER PO",
   qtyDelivered: "QTY. DELIVERED",
   spec: "SPECIFICATION SECTION",
   provider: "PROVIDED BY:",
@@ -70,6 +72,7 @@ const MIN_COLUMN_WIDTH = 80;
 const MAX_COLUMN_WIDTH = 520;
 const AUTOCOMPLETE_FILTERS = new Set([
   FIELD.drawing,
+  FIELD.pipeCategory,
   FIELD.category,
   FIELD.type,
   FIELD.endConnection,
@@ -83,10 +86,12 @@ const AUTOCOMPLETE_FILTERS = new Set([
 ]);
 const PRESERVE_NONBLANK_FIELDS = [
   FIELD.drawing,
+  FIELD.pipeCategory,
   FIELD.category,
   FIELD.type,
   FIELD.endConnection,
   FIELD.submittal,
+  FIELD.unitPricePo,
 ];
 const COLUMN_PREF_KEY = "equipmentMaterialHiddenColumns";
 const COLUMN_ORDER_PREF_KEY = "equipmentMaterialColumnOrder";
@@ -845,18 +850,35 @@ function normalizeEditedValue(header, value) {
   if ([FIELD.released, FIELD.delivery, FIELD.required].includes(header)) {
     return excelSerialFromDate(text);
   }
-  if ([FIELD.quantity, FIELD.lead, FIELD.remaining].includes(header)) {
-    const valueNumber = Number(text);
+  if (header === FIELD.lead) {
+    const parsedLead = leadTimeDays(text);
+    return parsedLead === null ? text : parsedLead;
+  }
+  if ([FIELD.quantity, FIELD.unitPricePo, FIELD.remaining].includes(header)) {
+    const valueNumber = Number(text.replace(/[$,]/g, ""));
     return Number.isFinite(valueNumber) ? valueNumber : text;
   }
   if ([FIELD.critical, FIELD.delivered].includes(header)) return Boolean(value);
   return text;
 }
 
+function leadTimeDays(value) {
+  const text = clean(value);
+  if (!text) return null;
+  const numbers = [...text.matchAll(/\d+(?:\.\d+)?/g)].map((match) => Number(match[0]));
+  if (!numbers.length) return null;
+  const highValue = Math.max(...numbers);
+  const normalized = normalizeKey(text);
+  if (normalized.includes("WEEK")) return Math.round(highValue * 7);
+  if (normalized.includes("MONTH")) return Math.round(highValue * 30);
+  return Math.round(highValue);
+}
+
 function shouldAutosaveTextInput(header) {
   if (AUTOCOMPLETE_FILTERS.has(header)) return false;
   return ![
     FIELD.quantity,
+    FIELD.unitPricePo,
     FIELD.qtyDelivered,
     FIELD.released,
     FIELD.lead,
@@ -1385,11 +1407,63 @@ function parseExcelXml(text) {
   })).filter((line) => line.some((value) => clean(value)));
 }
 
+function importHeaderKey(value) {
+  return clean(value)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "");
+}
+
+function importHeaderLookup(headers) {
+  const lookup = new Map(headers.map((header) => [importHeaderKey(header), header]));
+  Object.entries({
+    ITEMDESCRIPTION: FIELD.item,
+    LOCATION: FIELD.area,
+    AREABUILDING: FIELD.area,
+    PIPECATEGORY: FIELD.pipeCategory,
+    CATEGORY: FIELD.category,
+    NOTES: FIELD.notes,
+    NOTE: FIELD.notes,
+    OTY: FIELD.quantity,
+    QTY: FIELD.quantity,
+    QUANTITY: FIELD.quantity,
+    UNITS: FIELD.units,
+    UNITCOST: FIELD.unitPricePo,
+    UNITPRICEPERPO: FIELD.unitPricePo,
+    LEADTIME: FIELD.lead,
+    LEADTIMEDAYS: FIELD.lead,
+    PROVIDEDBY: FIELD.provider,
+  }).forEach(([sourceHeader, appHeader]) => {
+    lookup.set(sourceHeader, appHeader);
+  });
+  return lookup;
+}
+
+async function parseImportFile(file) {
+  const extension = file.name.split(".").pop().toLowerCase();
+  if (["xlsx", "xlsm"].includes(extension)) {
+    if (!window.XLSX?.read) throw new Error("Excel import parser is not loaded. Refresh the app and try again.");
+    const workbook = window.XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: false });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    return window.XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: "" })
+      .filter((line) => line.some((value) => clean(value)));
+  }
+
+  const text = await file.text();
+  return extension === "xls" || extension === "xml"
+    ? parseExcelXml(text)
+    : parseDelimited(text, extension === "csv" ? "," : "\t");
+}
+
 function importedValue(header, value) {
   const text = clean(value);
   if ([FIELD.qtyDelivered, FIELD.deliveries].includes(header)) return null;
   if (!text) return [FIELD.critical, FIELD.delivered].includes(header) ? false : null;
   if ([FIELD.critical, FIELD.delivered].includes(header)) return ["YES", "TRUE", "Y", "1", "CRITICAL", "DELIVERED"].includes(normalizeKey(text));
+  if (header === FIELD.provider) {
+    return canonicalSupplierName(text) || text;
+  }
   if (header === FIELD.notes) {
     return serializeNotes([{ timestamp: formatNoteTimestamp(), initials: "Import", text }]);
   }
@@ -1400,14 +1474,19 @@ function rowsFromImportGrid(grid) {
   if (!grid.length) return [];
   const expectedHeaders = allTableHeaders();
   const headerRow = grid[0].map(clean);
-  const headerMap = new Map(headerRow.map((header, index) => [normalizeKey(header), index]));
-  const hasKnownHeaders = expectedHeaders.some((header) => headerMap.has(normalizeKey(header)));
+  const headerLookup = importHeaderLookup(expectedHeaders);
+  const headerMap = new Map();
+  headerRow.forEach((header, index) => {
+    const appHeader = headerLookup.get(importHeaderKey(header));
+    if (appHeader) headerMap.set(appHeader, index);
+  });
+  const hasKnownHeaders = expectedHeaders.some((header) => headerMap.has(header));
   const dataRows = hasKnownHeaders ? grid.slice(1) : grid;
 
   return dataRows.map((line) => {
     const row = { _rowNumber: `new-${Date.now()}-${Math.floor(Math.random() * 1000000)}` };
     expectedHeaders.forEach((header, index) => {
-      const sourceIndex = hasKnownHeaders ? headerMap.get(normalizeKey(header)) : index;
+      const sourceIndex = hasKnownHeaders ? headerMap.get(header) : index;
       row[header] = importedValue(header, sourceIndex === undefined ? "" : line[sourceIndex]);
     });
     applyExpectedDeliveryCalculation(row);
@@ -1423,12 +1502,13 @@ async function importMaterialLog() {
     return;
   }
 
-  const text = await file.text();
-  const extension = file.name.split(".").pop().toLowerCase();
-  const grid = extension === "xls" || extension === "xml"
-    ? parseExcelXml(text)
-    : parseDelimited(text, extension === "csv" ? "," : "\t");
-  const rows = rowsFromImportGrid(grid);
+  let rows = [];
+  try {
+    rows = rowsFromImportGrid(await parseImportFile(file));
+  } catch (error) {
+    els.importStatus.textContent = error.message || "Import failed";
+    return;
+  }
 
   if (!rows.length) {
     els.importStatus.textContent = "No rows found";
@@ -1999,7 +2079,7 @@ function sortValue(row, header) {
   if (header === FIELD.qtyDelivered) return quantityDelivered(row);
   if (header === FIELD.critical) return row[FIELD.critical] ? 1 : 0;
   if (header === FIELD.delivered) return row[FIELD.delivered] ? 1 : 0;
-  if ([FIELD.quantity, FIELD.released, FIELD.delivery, FIELD.required, FIELD.lead, FIELD.remaining].includes(header)) {
+  if ([FIELD.quantity, FIELD.unitPricePo, FIELD.released, FIELD.delivery, FIELD.required, FIELD.lead, FIELD.remaining].includes(header)) {
     const value = numeric(row[header]);
     return value === null ? Number.POSITIVE_INFINITY : value;
   }
@@ -2014,7 +2094,7 @@ function dateConflict(row, header) {
 }
 
 function logHeaders() {
-  return [FIELD.drawing, FIELD.tag, FIELD.category, FIELD.type, FIELD.endConnection, FIELD.item, FIELD.quantity, FIELD.units, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.submittal, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
+  return [FIELD.drawing, FIELD.tag, FIELD.pipeCategory, FIELD.category, FIELD.type, FIELD.endConnection, FIELD.item, FIELD.quantity, FIELD.units, FIELD.unitPricePo, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.submittal, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
 }
 
 function orderedLogHeaders() {
@@ -2653,7 +2733,7 @@ function openDeliveryDialog(row, index = null) {
   els.deliveryTicket.value = clean(existing.ticketNumber);
   els.deliveryQty.value = clean(existing.qtyDelivered);
   els.deliveryUnits.value = clean(existing.units);
-  els.deliveryUnitPricePo.value = clean(existing.unitPricePo);
+  els.deliveryUnitPricePo.value = clean(existing.unitPricePo) || clean(row[FIELD.unitPricePo]);
   els.deliveryUnitPriceInvoice.value = clean(existing.unitPriceInvoice);
   els.deliveryNotes.value = clean(existing.notes);
   els.deliveryDialog.showModal();
@@ -2913,7 +2993,7 @@ function bindRemoveButtons() {
 }
 
 function allTableHeaders() {
-  return [FIELD.drawing, FIELD.tag, FIELD.category, FIELD.type, FIELD.endConnection, FIELD.item, FIELD.quantity, FIELD.units, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.submittal, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
+  return [FIELD.drawing, FIELD.tag, FIELD.pipeCategory, FIELD.category, FIELD.type, FIELD.endConnection, FIELD.item, FIELD.quantity, FIELD.units, FIELD.unitPricePo, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.submittal, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
 }
 
 function saveColumnPrefs() {
@@ -3029,7 +3109,8 @@ function providerReportLines() {
       return rowDeliveries(row)
         .filter((delivery) => numeric(delivery.qtyDelivered) !== null && numeric(delivery.qtyDelivered) > 0)
         .map((delivery) => {
-          const poAmount = reportLineAmount(delivery.qtyDelivered, delivery.unitPricePo);
+          const poUnitSource = clean(delivery.unitPricePo) ? delivery.unitPricePo : row[FIELD.unitPricePo];
+          const poAmount = reportLineAmount(delivery.qtyDelivered, poUnitSource);
           const invoiceAmount = reportLineAmount(delivery.qtyDelivered, delivery.unitPriceInvoice);
           return {
             project: project.name,
@@ -3040,7 +3121,7 @@ function providerReportLines() {
             ticket: clean(delivery.ticketNumber),
             quantity: numeric(delivery.qtyDelivered) ?? clean(delivery.qtyDelivered),
             units: clean(delivery.units) || clean(row[FIELD.units]),
-            poUnit: moneyValue(delivery.unitPricePo),
+            poUnit: moneyValue(poUnitSource),
             invoiceUnit: moneyValue(delivery.unitPriceInvoice),
             poAmount,
             invoiceAmount,
