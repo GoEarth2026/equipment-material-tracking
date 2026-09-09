@@ -2312,6 +2312,18 @@ function moveColumn(sourceHeader, targetHeader) {
   renderColumnMenu();
 }
 
+function moveColumnByStep(header, direction) {
+  const headers = orderedLogHeaders();
+  const index = headers.indexOf(header);
+  const nextIndex = index + direction;
+  if (index === -1 || nextIndex < 0 || nextIndex >= headers.length) return;
+  [headers[index], headers[nextIndex]] = [headers[nextIndex], headers[index]];
+  state.columnOrder = headers;
+  saveColumnLayoutPrefs();
+  renderLog();
+  renderColumnMenu();
+}
+
 function bindColumnDragAndResize() {
   let resizing = null;
 
@@ -2359,20 +2371,21 @@ function bindColumnDragAndResize() {
     });
   });
 
-  els.logHead.querySelectorAll("[data-header-column]").forEach((headerCell) => {
-    headerCell.addEventListener("dragstart", (event) => {
-      if (event.target.closest(".column-resize-handle, input, button, select, label, .column-filter-menu")) {
-        event.preventDefault();
-        return;
-      }
+  els.logHead.querySelectorAll("[data-drag-column]").forEach((handle) => {
+    handle.addEventListener("dragstart", (event) => {
+      const headerCell = handle.closest("[data-header-column]");
+      if (!headerCell) return;
       headerCell.classList.add("is-dragging");
       event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", headerCell.dataset.headerColumn);
+      event.dataTransfer.setData("text/plain", handle.dataset.dragColumn);
     });
-    headerCell.addEventListener("dragend", () => {
-      headerCell.classList.remove("is-dragging");
+    handle.addEventListener("dragend", () => {
+      handle.closest("[data-header-column]")?.classList.remove("is-dragging");
       els.logHead.querySelectorAll(".is-drop-target").forEach((cell) => cell.classList.remove("is-drop-target"));
     });
+  });
+
+  els.logHead.querySelectorAll("[data-header-column]").forEach((headerCell) => {
     headerCell.addEventListener("dragover", (event) => {
       event.preventDefault();
       headerCell.classList.add("is-drop-target");
@@ -2440,9 +2453,9 @@ function renderLogHead() {
       `;
     }
     return `
-      <th class="resizable-header" draggable="true" data-header-column="${escapeHtml(header)}" style="${columnStyle(header)}">
+      <th class="resizable-header" data-header-column="${escapeHtml(header)}" style="${columnStyle(header)}">
         <div class="th-control">
-          <span class="column-drag-handle" title="Drag to move column" aria-hidden="true">::</span>
+          <span class="column-drag-handle" draggable="true" data-drag-column="${escapeHtml(header)}" title="Drag to move column" aria-label="Drag to move ${escapeHtml(header)} column">::</span>
           <button class="sort-button" type="button" data-sort-column="${escapeHtml(header)}">
             <span>${escapeHtml(header)}</span>
             <span class="sort-indicator">${indicator}</span>
@@ -3069,11 +3082,17 @@ function renderColumnMenu() {
       <button id="showAllColumns" type="button">Show all</button>
       <button id="resetColumnLayout" type="button">Reset layout</button>
     </header>
-    ${headers.map((header) => `
-      <label class="column-option">
-        <input type="checkbox" value="${escapeHtml(header)}" ${state.hiddenColumns.has(header) ? "" : "checked"} />
-        <span>${escapeHtml(header)}</span>
-      </label>
+    ${headers.map((header, index) => `
+      <div class="column-option">
+        <label>
+          <input type="checkbox" value="${escapeHtml(header)}" ${state.hiddenColumns.has(header) ? "" : "checked"} />
+          <span>${escapeHtml(header)}</span>
+        </label>
+        <div class="column-order-buttons">
+          <button type="button" data-move-column="${escapeHtml(header)}" data-move-direction="-1" aria-label="Move ${escapeHtml(header)} column left" title="Move left" ${index === 0 ? "disabled" : ""}>←</button>
+          <button type="button" data-move-column="${escapeHtml(header)}" data-move-direction="1" aria-label="Move ${escapeHtml(header)} column right" title="Move right" ${index === headers.length - 1 ? "disabled" : ""}>→</button>
+        </div>
+      </div>
     `).join("")}
   `;
 
@@ -3097,6 +3116,12 @@ function renderColumnMenu() {
   });
 
   els.columnMenu.querySelector("#resetColumnLayout").addEventListener("click", resetColumnLayout);
+
+  els.columnMenu.querySelectorAll("[data-move-column]").forEach((button) => {
+    button.addEventListener("click", () => {
+      moveColumnByStep(button.dataset.moveColumn, Number(button.dataset.moveDirection));
+    });
+  });
 }
 
 function renderLog() {

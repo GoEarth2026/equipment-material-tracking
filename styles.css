@@ -335,7 +335,7 @@ textarea:disabled {
   top: calc(100% + 8px);
   right: 0;
   z-index: 5;
-  width: min(360px, calc(100vw - 48px));
+  width: min(460px, calc(100vw - 48px));
   max-height: 420px;
   overflow: auto;
   padding: 10px;
@@ -370,7 +370,7 @@ textarea:disabled {
 
 .column-option {
   display: grid;
-  grid-template-columns: 18px 1fr;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   min-height: 32px;
@@ -380,11 +380,46 @@ textarea:disabled {
   font-weight: 700;
 }
 
+.column-option label {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.column-option span {
+  overflow-wrap: anywhere;
+}
+
 .column-option input {
   min-height: auto;
   width: 16px;
   height: 16px;
   margin: 0;
+}
+
+.column-order-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.column-order-buttons button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid #c8d2ce;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.column-order-buttons button:disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
 }
 
 .view {
