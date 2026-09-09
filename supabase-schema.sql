@@ -43,3 +43,38 @@ create trigger set_equipment_material_app_state_updated_at
 before update on public.equipment_material_app_state
 for each row
 execute function public.set_equipment_material_app_state_updated_at();
+
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('equipment-material-submittals', 'equipment-material-submittals', true, 52428800)
+on conflict (id) do update
+set public = excluded.public,
+    file_size_limit = excluded.file_size_limit;
+
+drop policy if exists "Allow public read submittal files" on storage.objects;
+create policy "Allow public read submittal files"
+on storage.objects
+for select
+to anon
+using (bucket_id = 'equipment-material-submittals');
+
+drop policy if exists "Allow public upload submittal files" on storage.objects;
+create policy "Allow public upload submittal files"
+on storage.objects
+for insert
+to anon
+with check (bucket_id = 'equipment-material-submittals');
+
+drop policy if exists "Allow public update submittal files" on storage.objects;
+create policy "Allow public update submittal files"
+on storage.objects
+for update
+to anon
+using (bucket_id = 'equipment-material-submittals')
+with check (bucket_id = 'equipment-material-submittals');
+
+drop policy if exists "Allow public delete submittal files" on storage.objects;
+create policy "Allow public delete submittal files"
+on storage.objects
+for delete
+to anon
+using (bucket_id = 'equipment-material-submittals');

@@ -19,6 +19,7 @@ const FIELD = {
   system: "SYSTEM",
   submittal: "SUBMITTAL #",
   dateSubmitted: "DATE SUBMITTED",
+  submittalFiles: "SUBMITTAL FILES",
   submittalReturnExpected: "SUBMITTAL RETURN DATE - EXPECTED",
   submittalReturnActual: "SUBMITTAL RETURN DATE - ACTUAL",
   submittalReviewExpected: "SUBMITTAL REVIEW DURATION - EXPECTED",
@@ -76,6 +77,11 @@ const state = {
 const VALID_VIEWS = new Set(["dashboard", "log", "procurement", "reports", "import", "development", "admin"]);
 const ACTION_COLUMN_WIDTH = 112;
 const DEFAULT_COLUMN_WIDTH = 150;
+const DEFAULT_WIDE_COLUMN_WIDTHS = {
+  [FIELD.submittalFiles]: 280,
+  [FIELD.deliveries]: 360,
+  [FIELD.notes]: 280,
+};
 const MIN_COLUMN_WIDTH = 80;
 const MAX_COLUMN_WIDTH = 520;
 const AUTOCOMPLETE_FILTERS = new Set([
@@ -117,11 +123,13 @@ const ACTIVE_PROJECT_PREF_KEY = "equipmentMaterialActiveProject";
 const PROJECT_ROWS_PREFIX = "equipmentMaterialProjectRows:";
 const DEVELOPMENT_NOTES_PREF_KEY = "equipmentMaterialDevelopmentNotes";
 const SIDEBAR_PREF_KEY = "equipmentMaterialSidebarHidden";
+const SUBMITTAL_FILE_BUCKET = "equipment-material-submittals";
 const BULK_EDIT_EXCLUDED_FIELDS = new Set([
   FIELD.qtyDelivered,
   FIELD.deliveries,
   FIELD.remaining,
   FIELD.notes,
+  FIELD.submittalFiles,
 ]);
 
 const els = {
@@ -277,6 +285,27 @@ function mergeDeliveries(currentDeliveries = [], existingDeliveries = []) {
   return merged;
 }
 
+function submittalFiles(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function fileAttachmentKey(file, index) {
+  return clean(file?.path) || clean(file?.url) || `${clean(file?.name)}|${index}`;
+}
+
+function mergeSubmittalFiles(currentFiles = [], existingFiles = []) {
+  const existingByKey = new Map(submittalFiles(existingFiles).map((file, index) => [fileAttachmentKey(file, index), file]));
+  const currentKeys = new Set(submittalFiles(currentFiles).map(fileAttachmentKey));
+  const merged = submittalFiles(currentFiles).map((file, index) => {
+    const existing = existingByKey.get(fileAttachmentKey(file, index));
+    return existing ? mergeObjectsPreservingValues(file, existing) : file;
+  });
+  submittalFiles(existingFiles).forEach((file, index) => {
+    if (!currentKeys.has(fileAttachmentKey(file, index))) merged.push(file);
+  });
+  return merged;
+}
+
 function mergeRowsPreservingMissingFields(currentRows = [], existingRows = [], deletedKeys = new Set()) {
   const existingByKey = new Map(existingRows.map((row) => [rowKey(row), row]));
   const currentKeys = new Set(currentRows.map(rowKey));
@@ -291,6 +320,9 @@ function mergeRowsPreservingMissingFields(currentRows = [], existingRows = [], d
     });
     if (Array.isArray(row._deliveries) || Array.isArray(existing._deliveries)) {
       merged._deliveries = mergeDeliveries(row._deliveries || [], existing._deliveries || []);
+    }
+    if (Array.isArray(row[FIELD.submittalFiles]) || Array.isArray(existing[FIELD.submittalFiles])) {
+      merged[FIELD.submittalFiles] = mergeSubmittalFiles(row[FIELD.submittalFiles], existing[FIELD.submittalFiles]);
     }
     return merged;
   });
@@ -497,7 +529,7 @@ function updateSharedEditingControls() {
   });
 
   document.querySelectorAll(
-    "[data-edit-column], [data-provider-row], [data-status-row], [data-checkbox-row], [data-bulk-row], [data-bulk-select-visible], #bulkColumnList input, [data-add-delivery-row], [data-edit-delivery-row], [data-remove-delivery-row], [data-add-note-row], [data-edit-note-row], [data-insert-row], [data-remove-row], [data-remove-list], [data-rename-status], [data-archive-project], [data-restore-project]",
+    "[data-edit-column], [data-provider-row], [data-status-row], [data-checkbox-row], [data-bulk-row], [data-bulk-select-visible], #bulkColumnList input, [data-attach-submittal-row], [data-remove-submittal-file-row], [data-add-delivery-row], [data-edit-delivery-row], [data-remove-delivery-row], [data-add-note-row], [data-edit-note-row], [data-insert-row], [data-remove-row], [data-remove-list], [data-rename-status], [data-archive-project], [data-restore-project]",
   ).forEach((control) => {
     if (control.matches("[data-edit-column]")) {
       control.contentEditable = disabled ? "false" : "true";
@@ -1038,6 +1070,21 @@ function reportLineAmount(quantity, unitPrice) {
   return qty * price;
 }
 
+function fileSizeLabel(bytes) {
+  const size = Number(bytes);
+  if (!Number.isFinite(size) || size <= 0) return "";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function submittalFileUrl(file) {
+  if (clean(file?.url)) return clean(file.url);
+  const path = clean(file?.path);
+  if (!path || !state.supabaseClient) return "";
+  return state.supabaseClient.storage.from(SUBMITTAL_FILE_BUCKET).getPublicUrl(path).data.publicUrl || "";
+}
+
 function calculatedExpectedDelivery(row) {
   const released = numeric(row[FIELD.released]);
   const lead = numeric(row[FIELD.lead]);
@@ -1321,6 +1368,11 @@ function xmlEscape(value) {
 function exportValue(row, header) {
   if (header === FIELD.qtyDelivered) return quantityDelivered(row);
   if (header === FIELD.deliveries) return deliveriesForExport(row);
+  if (header === FIELD.submittalFiles) {
+    return submittalFiles(row[FIELD.submittalFiles])
+      .map((file) => [clean(file.name), submittalFileUrl(file)].filter(Boolean).join(" - "))
+      .join("\n");
+  }
   if ([FIELD.critical, FIELD.delivered].includes(header)) return row[header] ? "Yes" : "No";
   if (header === FIELD.notes) return notesForExport(row[FIELD.notes]);
   if (header === FIELD.unitPricePo) return formattedDeliveryMoney(row[header]);
@@ -1574,6 +1626,8 @@ function importHeaderLookup(headers) {
     SUBMITTALREVIEWEXPECTED: FIELD.submittalReviewExpected,
     SUBMITTALREVIEWDURATIONACTUAL: FIELD.submittalReviewActual,
     SUBMITTALREVIEWACTUAL: FIELD.submittalReviewActual,
+    SUBMITTALFILES: FIELD.submittalFiles,
+    SUBMITTALFILE: FIELD.submittalFiles,
   }).forEach(([sourceHeader, appHeader]) => {
     lookup.set(sourceHeader, appHeader);
   });
@@ -1622,6 +1676,7 @@ function setSelectedImportFile(file) {
 function importedValue(header, value) {
   const text = clean(value);
   if ([FIELD.qtyDelivered, FIELD.deliveries].includes(header)) return null;
+  if (header === FIELD.submittalFiles) return [];
   if (!text) return [FIELD.critical, FIELD.delivered].includes(header) ? false : null;
   if ([FIELD.critical, FIELD.delivered].includes(header)) return ["YES", "TRUE", "Y", "1", "CRITICAL", "DELIVERED"].includes(normalizeKey(text));
   if (header === FIELD.provider) {
@@ -1757,6 +1812,64 @@ function editItemNote(row, noteIndex) {
   renderLog();
   renderDashboard();
   renderProcurement();
+}
+
+async function attachSubmittalFile(row, file) {
+  if (!requireSharedEditing() || !file) return;
+  if (!state.supabaseClient) {
+    alert("File attachments require the shared Supabase database connection.");
+    return;
+  }
+  const key = rowKey(row);
+  const safeName = clean(file.name).replace(/[^a-z0-9._-]+/gi, "-").replace(/^-|-$/g, "") || "submittal-file";
+  const path = `${state.activeProjectId}/${key}/${Date.now()}-${safeName}`;
+  setSyncStatus("Uploading submittal file...", "pending");
+  try {
+    const { error } = await state.supabaseClient.storage
+      .from(SUBMITTAL_FILE_BUCKET)
+      .upload(path, file, { upsert: false, contentType: file.type || undefined });
+    if (error) throw error;
+    const files = submittalFiles(row[FIELD.submittalFiles]);
+    files.push({
+      name: file.name,
+      path,
+      size: file.size,
+      type: file.type,
+      uploadedAt: new Date().toISOString(),
+    });
+    saveCellEdit(row, FIELD.submittalFiles, files);
+    state.filtered = state.rows.filter(matchesFilters);
+    renderLog();
+    setSyncStatus("Submittal file attached", "cloud");
+  } catch (error) {
+    console.error(error);
+    const detail = clean(error?.message || error?.error_description);
+    setSyncStatus(detail ? `Submittal upload failed - ${detail}` : "Submittal upload failed", "local");
+    alert("The submittal file could not be uploaded. Confirm the Supabase storage bucket is set up, then try again.");
+  }
+}
+
+async function removeSubmittalFile(row, index) {
+  if (!requireSharedEditing()) return;
+  const files = submittalFiles(row[FIELD.submittalFiles]);
+  const file = files[index];
+  if (!file) return;
+  if (!confirm(`Remove ${clean(file.name) || "this submittal file"} from this item?`)) return;
+  try {
+    const path = clean(file.path);
+    if (path && state.supabaseClient) {
+      const { error } = await state.supabaseClient.storage.from(SUBMITTAL_FILE_BUCKET).remove([path]);
+      if (error) throw error;
+    }
+    files.splice(index, 1);
+    saveCellEdit(row, FIELD.submittalFiles, files);
+    state.filtered = state.rows.filter(matchesFilters);
+    renderLog();
+  } catch (error) {
+    console.error(error);
+    const detail = clean(error?.message || error?.error_description);
+    alert(detail ? `The submittal file could not be removed: ${detail}` : "The submittal file could not be removed.");
+  }
 }
 
 function developmentNoteCounts() {
@@ -2244,6 +2357,7 @@ function displayValue(row, header) {
   const value = row[header];
   if (header === FIELD.qtyDelivered) return quantityDelivered(row);
   if (header === FIELD.deliveries) return deliveriesForExport(row);
+  if (header === FIELD.submittalFiles) return submittalFiles(value).map((file) => clean(file.name)).filter(Boolean).join(", ");
   if (header === FIELD.critical) return value ? "Critical" : "";
   if (header === FIELD.delivered) return value ? "Delivered" : "";
   if (header === FIELD.unitPricePo) return clean(value) ? formattedDeliveryMoney(value) : "";
@@ -2269,7 +2383,7 @@ function dateConflict(row, header) {
 }
 
 function logHeaders() {
-  return [FIELD.drawing, FIELD.tag, FIELD.pipeCategory, FIELD.category, FIELD.type, FIELD.endConnection, FIELD.item, FIELD.quantity, FIELD.units, FIELD.unitPricePo, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.submittal, FIELD.dateSubmitted, FIELD.submittalReviewExpected, FIELD.submittalReturnExpected, FIELD.submittalReturnActual, FIELD.submittalReviewActual, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
+  return [FIELD.drawing, FIELD.tag, FIELD.pipeCategory, FIELD.category, FIELD.type, FIELD.endConnection, FIELD.item, FIELD.quantity, FIELD.units, FIELD.unitPricePo, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.submittal, FIELD.dateSubmitted, FIELD.submittalFiles, FIELD.submittalReviewExpected, FIELD.submittalReturnExpected, FIELD.submittalReturnActual, FIELD.submittalReviewActual, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
 }
 
 function orderedLogHeaders() {
@@ -2295,7 +2409,8 @@ function visibleLogHeaders() {
 
 function columnWidth(header) {
   const value = Number(state.columnWidths[header]);
-  return Number.isFinite(value) ? Math.min(Math.max(value, MIN_COLUMN_WIDTH), MAX_COLUMN_WIDTH) : DEFAULT_COLUMN_WIDTH;
+  const defaultWidth = DEFAULT_WIDE_COLUMN_WIDTHS[header] || DEFAULT_COLUMN_WIDTH;
+  return Number.isFinite(value) ? Math.min(Math.max(value, MIN_COLUMN_WIDTH), MAX_COLUMN_WIDTH) : defaultWidth;
 }
 
 function tableWidth(headers = visibleLogHeaders()) {
@@ -3189,6 +3304,32 @@ function renderNotesCell(row, header = FIELD.notes) {
   `;
 }
 
+function renderSubmittalFilesCell(row, header = FIELD.submittalFiles) {
+  const files = submittalFiles(row[FIELD.submittalFiles]);
+  const key = rowKey(row);
+  const disabled = canEditSharedData() ? "" : "disabled";
+  return `
+    <td class="submittal-files-cell" data-cell-column="${escapeHtml(header)}" style="${columnStyle(header)}">
+      <div class="submittal-file-list">
+        ${files.map((file, index) => {
+          const url = submittalFileUrl(file);
+          return `
+            <div class="submittal-file-entry">
+              ${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(clean(file.name) || "Submittal file")}</a>` : `<span>${escapeHtml(clean(file.name) || "Submittal file")}</span>`}
+              <div class="meta">${escapeHtml([fileSizeLabel(file.size), clean(file.type)].filter(Boolean).join(" · "))}</div>
+              <button class="note-edit-button danger" type="button" data-remove-submittal-file-row="${escapeHtml(key)}" data-file-index="${index}" ${disabled}>Remove</button>
+            </div>
+          `;
+        }).join("") || `<div class="meta">No files attached.</div>`}
+        <label class="attach-file-button">
+          Attach File
+          <input type="file" data-attach-submittal-row="${escapeHtml(key)}" multiple ${disabled} />
+        </label>
+      </div>
+    </td>
+  `;
+}
+
 function renderDeliveriesCell(row, header = FIELD.deliveries) {
   const deliveries = rowDeliveries(row);
   const key = rowKey(row);
@@ -3280,6 +3421,9 @@ function renderLogBody() {
         if (header === FIELD.deliveries) {
           return renderDeliveriesCell(row, header);
         }
+        if (header === FIELD.submittalFiles) {
+          return renderSubmittalFilesCell(row, header);
+        }
         if (header === FIELD.notes) {
           return renderNotesCell(row, header);
         }
@@ -3294,6 +3438,7 @@ function renderLogBody() {
   bindLogCheckboxes();
   bindDeliveryButtons();
   bindNoteButtons();
+  bindSubmittalFileButtons();
   bindInsertButtons();
   bindRemoveButtons();
   bindBulkRowSelection();
@@ -3316,6 +3461,27 @@ function bindBulkRowSelection() {
   });
 }
 
+function bindSubmittalFileButtons() {
+  els.logBody.querySelectorAll("[data-attach-submittal-row]").forEach((input) => {
+    input.addEventListener("change", async () => {
+      const row = state.rows.find((candidate) => rowKey(candidate) === input.dataset.attachSubmittalRow);
+      if (row && input.files?.length) {
+        const files = Array.from(input.files);
+        for (const file of files) {
+          await attachSubmittalFile(row, file);
+        }
+      }
+      input.value = "";
+    });
+  });
+  els.logBody.querySelectorAll("[data-remove-submittal-file-row]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const row = state.rows.find((candidate) => rowKey(candidate) === button.dataset.removeSubmittalFileRow);
+      if (row) removeSubmittalFile(row, Number(button.dataset.fileIndex));
+    });
+  });
+}
+
 function bindInsertButtons() {
   els.logBody.querySelectorAll("[data-insert-row]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -3331,7 +3497,7 @@ function bindRemoveButtons() {
 }
 
 function allTableHeaders() {
-  return [FIELD.drawing, FIELD.tag, FIELD.pipeCategory, FIELD.category, FIELD.type, FIELD.endConnection, FIELD.item, FIELD.quantity, FIELD.units, FIELD.unitPricePo, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.submittal, FIELD.dateSubmitted, FIELD.submittalReviewExpected, FIELD.submittalReturnExpected, FIELD.submittalReturnActual, FIELD.submittalReviewActual, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
+  return [FIELD.drawing, FIELD.tag, FIELD.pipeCategory, FIELD.category, FIELD.type, FIELD.endConnection, FIELD.item, FIELD.quantity, FIELD.units, FIELD.unitPricePo, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.submittal, FIELD.dateSubmitted, FIELD.submittalFiles, FIELD.submittalReviewExpected, FIELD.submittalReturnExpected, FIELD.submittalReturnActual, FIELD.submittalReviewActual, FIELD.status, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
 }
 
 function saveColumnPrefs() {
