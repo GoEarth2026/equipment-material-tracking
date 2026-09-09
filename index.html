@@ -86,6 +86,7 @@
 
         <section class="column-controls" aria-label="Column controls">
           <button class="ghost-button" id="addItemButton" type="button">Add Item</button>
+          <button class="ghost-button" id="bulkEditToggle" type="button" aria-expanded="false">Bulk Edit</button>
           <button class="ghost-button" id="exportExcelButton" type="button">Export Excel</button>
           <button class="ghost-button" id="printLogButton" type="button">Print Log</button>
           <button class="ghost-button" id="columnToggle" type="button" aria-expanded="false">Columns</button>
@@ -97,6 +98,21 @@
         </section>
 
         <section class="view" id="logView">
+          <section class="bulk-edit-panel" id="bulkEditPanel" hidden>
+            <div>
+              <strong id="bulkSelectionCount">0 rows selected</strong>
+              <span>Select rows in the Actions column, choose columns, then enter the shared value.</span>
+            </div>
+            <div class="bulk-column-list" id="bulkColumnList"></div>
+            <label>
+              Value To Apply
+              <input id="bulkEditValue" type="text" />
+            </label>
+            <div class="bulk-edit-actions">
+              <button class="ghost-button" id="bulkApplyButton" type="button">Apply to Selected Rows</button>
+              <button class="ghost-button" id="bulkClearButton" type="button">Clear Selection</button>
+            </div>
+          </section>
           <div class="table-scroll-top" id="tableScrollTop" aria-label="Material log horizontal scroll">
             <div id="tableScrollTopInner"></div>
           </div>
@@ -290,6 +306,6 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="./supabase-config.js"></script>
-    <script src="./app.js?v=import-menu1"></script>
+    <script src="./app.js?v=bulk-edit1"></script>
   </body>
 </html>

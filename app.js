@@ -45,6 +45,8 @@ const state = {
   hiddenColumns: new Set(),
   columnOrder: [],
   columnWidths: {},
+  selectedBulkRows: new Set(),
+  selectedBulkColumns: new Set(),
   deletedRowsByProject: {},
   logColumnFilters: {},
   logSort: { column: null, direction: "asc" },
@@ -67,7 +69,7 @@ const state = {
 };
 
 const VALID_VIEWS = new Set(["dashboard", "log", "procurement", "reports", "import", "development", "admin"]);
-const ACTION_COLUMN_WIDTH = 82;
+const ACTION_COLUMN_WIDTH = 112;
 const DEFAULT_COLUMN_WIDTH = 150;
 const MIN_COLUMN_WIDTH = 80;
 const MAX_COLUMN_WIDTH = 520;
@@ -110,6 +112,12 @@ const ACTIVE_PROJECT_PREF_KEY = "equipmentMaterialActiveProject";
 const PROJECT_ROWS_PREFIX = "equipmentMaterialProjectRows:";
 const DEVELOPMENT_NOTES_PREF_KEY = "equipmentMaterialDevelopmentNotes";
 const SIDEBAR_PREF_KEY = "equipmentMaterialSidebarHidden";
+const BULK_EDIT_EXCLUDED_FIELDS = new Set([
+  FIELD.qtyDelivered,
+  FIELD.deliveries,
+  FIELD.remaining,
+  FIELD.notes,
+]);
 
 const els = {
   appShell: document.querySelector("#appShell"),
@@ -124,6 +132,13 @@ const els = {
   timing: document.querySelector("#timingFilter"),
   reset: document.querySelector("#resetFilters"),
   addItem: document.querySelector("#addItemButton"),
+  bulkEditToggle: document.querySelector("#bulkEditToggle"),
+  bulkEditPanel: document.querySelector("#bulkEditPanel"),
+  bulkSelectionCount: document.querySelector("#bulkSelectionCount"),
+  bulkColumnList: document.querySelector("#bulkColumnList"),
+  bulkEditValue: document.querySelector("#bulkEditValue"),
+  bulkApply: document.querySelector("#bulkApplyButton"),
+  bulkClear: document.querySelector("#bulkClearButton"),
   exportExcel: document.querySelector("#exportExcelButton"),
   printLog: document.querySelector("#printLogButton"),
   columnToggle: document.querySelector("#columnToggle"),
@@ -382,6 +397,10 @@ function updateSharedEditingControls() {
 
   [
     els.addItem,
+    els.bulkEditToggle,
+    els.bulkEditValue,
+    els.bulkApply,
+    els.bulkClear,
     els.importLog,
     els.projectInput,
     els.supplierInput,
@@ -414,7 +433,7 @@ function updateSharedEditingControls() {
   });
 
   document.querySelectorAll(
-    "[data-edit-column], [data-provider-row], [data-status-row], [data-checkbox-row], [data-add-delivery-row], [data-edit-delivery-row], [data-remove-delivery-row], [data-add-note-row], [data-edit-note-row], [data-insert-row], [data-remove-row], [data-remove-list], [data-rename-status], [data-archive-project], [data-restore-project]",
+    "[data-edit-column], [data-provider-row], [data-status-row], [data-checkbox-row], [data-bulk-row], [data-bulk-select-visible], #bulkColumnList input, [data-add-delivery-row], [data-edit-delivery-row], [data-remove-delivery-row], [data-add-note-row], [data-edit-note-row], [data-insert-row], [data-remove-row], [data-remove-list], [data-rename-status], [data-archive-project], [data-restore-project]",
   ).forEach((control) => {
     if (control.matches("[data-edit-column]")) {
       control.contentEditable = disabled ? "false" : "true";
@@ -713,6 +732,7 @@ function loadProject(projectId) {
   if (!nextProject) return;
   saveCurrentProjectRows();
   state.activeProjectId = nextProject.id;
+  state.selectedBulkRows.clear();
   localStorage.setItem(ACTIVE_PROJECT_PREF_KEY, state.activeProjectId);
   state.deletedRowKeys = new Set(state.deletedRowsByProject[state.activeProjectId] || []);
   state.rows = loadRowsForProject(nextProject);
@@ -1137,6 +1157,7 @@ function removeItem(rowKeyValue) {
   const label = clean(row?.[FIELD.tag]) || clean(row?.[FIELD.item]) || "this item";
   if (!confirm(`Remove ${label} from the log?`)) return;
   state.deletedRowKeys.add(rowKeyValue);
+  state.selectedBulkRows.delete(rowKeyValue);
   state.rows = state.rows.filter((candidate) => rowKey(candidate) !== rowKeyValue);
   saveDeletedItems();
   saveAddedItems();
@@ -2408,6 +2429,10 @@ function renderLogHead() {
     <th class="action-header" style="width: ${ACTION_COLUMN_WIDTH}px; min-width: ${ACTION_COLUMN_WIDTH}px; max-width: ${ACTION_COLUMN_WIDTH}px;">
       <div class="th-control">
         <span>Actions</span>
+        <label class="bulk-select-all">
+          <input type="checkbox" data-bulk-select-visible aria-label="Select all visible rows" />
+          <span>Select visible</span>
+        </label>
       </div>
     </th>
     ${headers.map((header) => {
@@ -2523,11 +2548,111 @@ function renderLogHead() {
     });
   });
 
+  const visibleKeys = selectedVisibleRowKeys();
+  const selectVisible = els.logHead.querySelector("[data-bulk-select-visible]");
+  if (selectVisible) {
+    selectVisible.checked = Boolean(visibleKeys.length) && visibleKeys.every((key) => state.selectedBulkRows.has(key));
+    selectVisible.indeterminate = visibleKeys.some((key) => state.selectedBulkRows.has(key)) && !selectVisible.checked;
+    selectVisible.addEventListener("change", () => toggleVisibleBulkRows(selectVisible.checked));
+  }
+
   bindColumnDragAndResize();
 }
 
 function tabbableLogHeaders() {
   return visibleLogHeaders().filter((header) => ![FIELD.qtyDelivered, FIELD.deliveries, FIELD.notes].includes(header));
+}
+
+function bulkEditableHeaders() {
+  return visibleLogHeaders().filter((header) => !BULK_EDIT_EXCLUDED_FIELDS.has(header));
+}
+
+function selectedVisibleRowKeys() {
+  return getLogRows().map(rowKey);
+}
+
+function cleanBulkSelection() {
+  const validKeys = new Set(state.rows.map(rowKey));
+  state.selectedBulkRows = new Set([...state.selectedBulkRows].filter((key) => validKeys.has(key)));
+}
+
+function selectedBulkRows() {
+  cleanBulkSelection();
+  return state.rows.filter((row) => state.selectedBulkRows.has(rowKey(row)));
+}
+
+function renderBulkEditPanel() {
+  if (!els.bulkSelectionCount || !els.bulkColumnList) return;
+  cleanBulkSelection();
+  const selectedCount = state.selectedBulkRows.size;
+  const headers = bulkEditableHeaders();
+  els.bulkSelectionCount.textContent = `${selectedCount} row${selectedCount === 1 ? "" : "s"} selected`;
+  els.bulkColumnList.innerHTML = headers.map((header) => `
+    <label>
+      <input type="checkbox" value="${escapeHtml(header)}" ${state.selectedBulkColumns.has(header) ? "checked" : ""} />
+      <span>${escapeHtml(header)}</span>
+    </label>
+  `).join("");
+  els.bulkColumnList.querySelectorAll("input[type='checkbox']").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        state.selectedBulkColumns.add(checkbox.value);
+      } else {
+        state.selectedBulkColumns.delete(checkbox.value);
+      }
+    });
+  });
+}
+
+function toggleVisibleBulkRows(checked) {
+  selectedVisibleRowKeys().forEach((key) => {
+    if (checked) {
+      state.selectedBulkRows.add(key);
+    } else {
+      state.selectedBulkRows.delete(key);
+    }
+  });
+  renderLog();
+}
+
+function clearBulkSelection() {
+  state.selectedBulkRows.clear();
+  renderLog();
+}
+
+function bulkNormalizedValue(header, value) {
+  const text = clean(value);
+  if (header === FIELD.provider) return canonicalSupplierName(text) || text;
+  if ([FIELD.critical, FIELD.delivered].includes(header)) {
+    return ["YES", "TRUE", "Y", "1", "CHECKED", "CRITICAL", "DELIVERED"].includes(normalizeKey(text));
+  }
+  return normalizeEditedValue(header, value);
+}
+
+function applyBulkEdit() {
+  if (!requireSharedEditing()) return;
+  const rows = selectedBulkRows();
+  const headers = [...state.selectedBulkColumns].filter((header) => bulkEditableHeaders().includes(header));
+  if (!rows.length) {
+    alert("Select at least one row first.");
+    return;
+  }
+  if (!headers.length) {
+    alert("Select at least one column to update.");
+    return;
+  }
+  const value = els.bulkEditValue.value;
+  if (!confirm(`Apply this value to ${headers.length} column(s) across ${rows.length} selected row(s)?`)) return;
+  rows.forEach((row) => {
+    headers.forEach((header) => {
+      saveCellEdit(row, header, bulkNormalizedValue(header, value));
+    });
+  });
+  state.filtered = state.rows.filter(matchesFilters);
+  loadAdminLists();
+  populateGlobalFilters();
+  renderColumnMenu();
+  render();
 }
 
 function focusLogField(rowKeyValue, header) {
@@ -2989,6 +3114,9 @@ function renderLogBody() {
   els.logBody.innerHTML = rows.map((row) => `
     <tr>
       <td class="action-cell" style="width: ${ACTION_COLUMN_WIDTH}px; min-width: ${ACTION_COLUMN_WIDTH}px; max-width: ${ACTION_COLUMN_WIDTH}px;">
+        <label class="bulk-row-select" title="Select row for bulk edit">
+          <input type="checkbox" data-bulk-row="${escapeHtml(rowKey(row))}" aria-label="Select row for bulk edit" ${state.selectedBulkRows.has(rowKey(row)) ? "checked" : ""} ${disabled} />
+        </label>
         <button class="icon-row-button remove-row-button" type="button" data-remove-row="${escapeHtml(rowKey(row))}" aria-label="Remove item" title="Remove item" ${disabled}>×</button>
         <button class="icon-row-button insert-row-button" type="button" data-insert-row="${escapeHtml(rowKey(row))}" data-insert-position="below" aria-label="Insert row below" title="Insert row below" ${disabled}>+</button>
       </td>
@@ -3039,8 +3167,24 @@ function renderLogBody() {
   bindNoteButtons();
   bindInsertButtons();
   bindRemoveButtons();
+  bindBulkRowSelection();
+  renderBulkEditPanel();
   updateSharedEditingControls();
   syncTopScrollbarWidth();
+}
+
+function bindBulkRowSelection() {
+  els.logBody.querySelectorAll("[data-bulk-row]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        state.selectedBulkRows.add(checkbox.dataset.bulkRow);
+      } else {
+        state.selectedBulkRows.delete(checkbox.dataset.bulkRow);
+      }
+      renderBulkEditPanel();
+      renderLogHead();
+    });
+  });
 }
 
 function bindInsertButtons() {
@@ -3542,6 +3686,10 @@ function setView(view) {
   }[view];
   const showColumnControls = view === "log";
   document.querySelector(".column-controls").style.display = showColumnControls ? "flex" : "none";
+  if (els.bulkEditPanel && view !== "log") {
+    els.bulkEditPanel.hidden = true;
+    els.bulkEditToggle?.setAttribute("aria-expanded", "false");
+  }
   if (els.tableScrollTop) {
     els.tableScrollTop.style.display = showColumnControls ? "block" : "none";
   }
@@ -3648,6 +3796,16 @@ async function init() {
   });
 
   els.addItem.addEventListener("click", addItem);
+
+  els.bulkEditToggle.addEventListener("click", () => {
+    els.bulkEditPanel.hidden = !els.bulkEditPanel.hidden;
+    els.bulkEditToggle.setAttribute("aria-expanded", String(!els.bulkEditPanel.hidden));
+    renderBulkEditPanel();
+  });
+
+  els.bulkApply.addEventListener("click", applyBulkEdit);
+
+  els.bulkClear.addEventListener("click", clearBulkSelection);
 
   els.exportExcel.addEventListener("click", exportMaterialLog);
 

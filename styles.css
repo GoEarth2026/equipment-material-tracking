@@ -325,9 +325,100 @@ textarea:disabled {
 .column-controls {
   position: relative;
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
   margin-bottom: 16px;
+}
+
+.bulk-edit-panel {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(260px, 2fr) minmax(180px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.bulk-edit-panel[hidden] {
+  display: none;
+}
+
+.bulk-edit-panel > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.bulk-edit-panel strong {
+  font-size: 14px;
+}
+
+.bulk-edit-panel span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.bulk-edit-panel label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.bulk-column-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 6px;
+  max-height: 118px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fbfcfb;
+}
+
+.bulk-column-list label {
+  grid-template-columns: 16px minmax(0, 1fr);
+  grid-auto-flow: column;
+  align-items: center;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.bulk-column-list input {
+  min-height: auto;
+  margin: 0;
+}
+
+.bulk-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bulk-select-all {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 5px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.bulk-select-all input,
+.bulk-row-select input {
+  min-height: auto;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
 }
 
 .column-menu {
@@ -889,6 +980,12 @@ td.date-conflict {
   height: 100%;
   min-height: 78px;
   background: #fbfcfb;
+}
+
+.bulk-row-select {
+  position: absolute;
+  top: 12px;
+  right: 10px;
 }
 
 .icon-row-button {
@@ -1466,6 +1563,7 @@ dd {
   .project-metrics,
   .development-notes-layout,
   .admin-grid,
+  .bulk-edit-panel,
   .procurement-board,
   .report-summary,
   .source-grid {
