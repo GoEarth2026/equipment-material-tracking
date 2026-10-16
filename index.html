@@ -7,6 +7,22 @@
     <link rel="stylesheet" href="./styles.css?v=provider-clean-hard1" />
   </head>
   <body>
+    <section class="auth-gate" id="authGate" hidden>
+      <div class="auth-panel">
+        <div class="brand-mark">EM</div>
+        <div>
+          <h1>Equipment &amp; Material Tracking</h1>
+          <p>Sign in to view project records and shared files.</p>
+        </div>
+        <form id="authForm" class="auth-form">
+          <label>Email<input id="authEmail" type="email" autocomplete="email" required /></label>
+          <label>Password<input id="authPassword" type="password" autocomplete="current-password" minlength="8" required /></label>
+          <p class="auth-message" id="authMessage" aria-live="polite"></p>
+          <button class="ghost-button primary-action" type="submit">Sign In</button>
+          <button class="text-button neutral" id="createAccountButton" type="button">Create Account</button>
+        </form>
+      </div>
+    </section>
     <div class="app-shell" id="appShell">
       <aside class="sidebar" aria-label="App navigation">
         <div class="brand">
@@ -46,6 +62,7 @@
             <p class="sync-status" id="syncStatus">Local mode</p>
           </div>
           <div class="top-actions">
+            <button class="ghost-button" id="alertsButton" type="button">Alerts <span id="alertCount">0</span></button>
             <button class="ghost-button sidebar-toggle" id="sidebarToggleButton" type="button" aria-expanded="true">Hide Menu</button>
             <label class="search">
               <span>Project</span>
@@ -56,6 +73,10 @@
               <input id="searchInput" type="search" placeholder="Tag, item, provider, notes" />
             </label>
             <button class="ghost-button" id="resetFilters" type="button">Reset</button>
+            <div class="account-menu">
+              <span id="currentUserLabel"></span>
+              <button class="text-button neutral" id="signOutButton" type="button">Sign Out</button>
+            </div>
           </div>
         </header>
 
@@ -89,6 +110,9 @@
           <button class="ghost-button" id="bulkEditToggle" type="button" aria-expanded="false">Bulk Edit</button>
           <button class="ghost-button" id="exportExcelButton" type="button">Export Excel</button>
           <button class="ghost-button" id="printLogButton" type="button">Print Log</button>
+          <select id="savedViewSelect" aria-label="Saved views"><option value="">Saved Views</option></select>
+          <button class="ghost-button" id="saveViewButton" type="button">Save View</button>
+          <button class="ghost-button" id="deleteViewButton" type="button">Delete View</button>
           <button class="ghost-button" id="columnToggle" type="button" aria-expanded="false">Columns</button>
           <div class="column-menu" id="columnMenu" hidden></div>
         </section>
@@ -251,6 +275,22 @@
               </form>
               <div class="admin-list" id="statusAdminList"></div>
             </section>
+
+            <section class="panel admin-panel" id="userAccessPanel">
+              <div class="section-heading">
+                <h3>User Access</h3>
+                <span id="userAccessCount"></span>
+              </div>
+              <div class="admin-list" id="userAccessList"></div>
+            </section>
+
+            <section class="panel admin-panel" id="backupPanel">
+              <div class="section-heading">
+                <h3>Recovery Snapshots</h3>
+                <span id="backupCount"></span>
+              </div>
+              <div class="admin-list" id="backupList"></div>
+            </section>
           </div>
         </section>
 
@@ -303,9 +343,25 @@
       </form>
     </dialog>
 
+    <dialog class="item-details-dialog" id="itemDetailsDialog">
+      <div class="delivery-dialog-header">
+        <div><h3 id="itemDetailsTitle">Item Details</h3><p id="itemDetailsSubtitle" class="delivery-dialog-item"></p></div>
+        <button class="icon-row-button" id="itemDetailsClose" type="button" aria-label="Close item details">×</button>
+      </div>
+      <div class="item-details-content" id="itemDetailsContent"></div>
+    </dialog>
+
+    <dialog class="alerts-dialog" id="alertsDialog">
+      <div class="delivery-dialog-header">
+        <div><h3>Project Alerts</h3><p class="delivery-dialog-item">Items requiring attention across active projects</p></div>
+        <button class="icon-row-button" id="alertsClose" type="button" aria-label="Close alerts">×</button>
+      </div>
+      <div class="alerts-list" id="alertsList"></div>
+    </dialog>
+
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="./supabase-config.js"></script>
-    <script src="./app.js?v=scheduled-release1"></script>
+    <script src="./app.js?v=reliability-auth1"></script>
   </body>
 </html>

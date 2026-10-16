@@ -68,6 +68,18 @@ const state = {
   supabaseClient: null,
   cloudReady: false,
   cloudSaveTimer: null,
+  cloudRetryTimer: null,
+  cloudUpdatedAt: null,
+  savePending: false,
+  currentUser: null,
+  currentRole: "viewer",
+  userRoles: [],
+  backups: [],
+  activityLog: [],
+  savedViews: [],
+  detailRowKey: "",
+  editingChannel: null,
+  activeEditors: [],
   adminListsLoadedFromCloud: false,
   deliveryEditor: {
     rowKey: "",
@@ -76,7 +88,7 @@ const state = {
 };
 
 const VALID_VIEWS = new Set(["dashboard", "log", "procurement", "reports", "import", "development", "admin"]);
-const ACTION_COLUMN_WIDTH = 112;
+const ACTION_COLUMN_WIDTH = 148;
 const DEFAULT_COLUMN_WIDTH = 150;
 const DEFAULT_WIDE_COLUMN_WIDTHS = {
   [FIELD.submittalFiles]: 280,
@@ -124,6 +136,8 @@ const ACTIVE_PROJECT_PREF_KEY = "equipmentMaterialActiveProject";
 const PROJECT_ROWS_PREFIX = "equipmentMaterialProjectRows:";
 const DEVELOPMENT_NOTES_PREF_KEY = "equipmentMaterialDevelopmentNotes";
 const SIDEBAR_PREF_KEY = "equipmentMaterialSidebarHidden";
+const PENDING_SAVE_PREF_KEY = "equipmentMaterialPendingSharedSave";
+const SAVED_VIEWS_PREF_KEY = "equipmentMaterialSavedViews";
 const SUBMITTAL_FILE_BUCKET = "equipment-material-submittals";
 const BULK_EDIT_EXCLUDED_FIELDS = new Set([
   FIELD.qtyDelivered,
@@ -138,6 +152,19 @@ const els = {
   sidebarToggle: document.querySelector("#sidebarToggleButton"),
   viewTitle: document.querySelector("#view-title"),
   syncStatus: document.querySelector("#syncStatus"),
+  authGate: document.querySelector("#authGate"),
+  authForm: document.querySelector("#authForm"),
+  authEmail: document.querySelector("#authEmail"),
+  authPassword: document.querySelector("#authPassword"),
+  authMessage: document.querySelector("#authMessage"),
+  createAccount: document.querySelector("#createAccountButton"),
+  currentUserLabel: document.querySelector("#currentUserLabel"),
+  signOut: document.querySelector("#signOutButton"),
+  alertsButton: document.querySelector("#alertsButton"),
+  alertCount: document.querySelector("#alertCount"),
+  alertsDialog: document.querySelector("#alertsDialog"),
+  alertsClose: document.querySelector("#alertsClose"),
+  alertsList: document.querySelector("#alertsList"),
   projectSelect: document.querySelector("#projectSelect"),
   search: document.querySelector("#searchInput"),
   status: document.querySelector("#statusFilter"),
@@ -155,6 +182,9 @@ const els = {
   bulkClear: document.querySelector("#bulkClearButton"),
   exportExcel: document.querySelector("#exportExcelButton"),
   printLog: document.querySelector("#printLogButton"),
+  savedViewSelect: document.querySelector("#savedViewSelect"),
+  saveView: document.querySelector("#saveViewButton"),
+  deleteView: document.querySelector("#deleteViewButton"),
   columnToggle: document.querySelector("#columnToggle"),
   columnMenu: document.querySelector("#columnMenu"),
   projectDashboard: document.querySelector("#projectDashboard"),
@@ -195,6 +225,12 @@ const els = {
   statusAdminInput: document.querySelector("#statusAdminInput"),
   statusAdminList: document.querySelector("#statusAdminList"),
   statusAdminCount: document.querySelector("#statusAdminCount"),
+  userAccessPanel: document.querySelector("#userAccessPanel"),
+  userAccessList: document.querySelector("#userAccessList"),
+  userAccessCount: document.querySelector("#userAccessCount"),
+  backupPanel: document.querySelector("#backupPanel"),
+  backupList: document.querySelector("#backupList"),
+  backupCount: document.querySelector("#backupCount"),
   downloadTemplate: document.querySelector("#downloadTemplateButton"),
   importProject: document.querySelector("#importProjectSelect"),
   importMode: document.querySelector("#importMode"),
@@ -216,6 +252,11 @@ const els = {
   deliveryUnitPricePo: document.querySelector("#deliveryUnitPricePoInput"),
   deliveryUnitPriceInvoice: document.querySelector("#deliveryUnitPriceInvoiceInput"),
   deliveryNotes: document.querySelector("#deliveryNotesInput"),
+  itemDetailsDialog: document.querySelector("#itemDetailsDialog"),
+  itemDetailsTitle: document.querySelector("#itemDetailsTitle"),
+  itemDetailsSubtitle: document.querySelector("#itemDetailsSubtitle"),
+  itemDetailsContent: document.querySelector("#itemDetailsContent"),
+  itemDetailsClose: document.querySelector("#itemDetailsClose"),
 };
 
 function clean(value) {
@@ -314,8 +355,20 @@ function mergeRowsPreservingMissingFields(currentRows = [], existingRows = [], d
     const existing = existingByKey.get(rowKey(row));
     if (!existing) return row;
     const merged = mergeObjectsPreservingValues(row, existing);
+    const currentFieldTimes = row._fieldUpdatedAt || {};
+    const existingFieldTimes = existing._fieldUpdatedAt || {};
+    const trackedFields = new Set([...Object.keys(currentFieldTimes), ...Object.keys(existingFieldTimes)]);
+    trackedFields.forEach((field) => {
+      const currentTime = clean(currentFieldTimes[field]);
+      const existingTime = clean(existingFieldTimes[field]);
+      merged[field] = existingTime > currentTime ? existing[field] : row[field];
+    });
+    merged._fieldUpdatedAt = { ...existingFieldTimes, ...currentFieldTimes };
+    Object.entries(existingFieldTimes).forEach(([field, timestamp]) => {
+      if (clean(timestamp) > clean(currentFieldTimes[field])) merged._fieldUpdatedAt[field] = timestamp;
+    });
     PRESERVE_NONBLANK_FIELDS.forEach((field) => {
-      if (!hasMeaningfulValue(row[field]) && hasMeaningfulValue(existing[field])) {
+      if (!currentFieldTimes[field] && !hasMeaningfulValue(row[field]) && hasMeaningfulValue(existing[field])) {
         merged[field] = existing[field];
       }
     });
@@ -416,6 +469,12 @@ function mergeSharedState(currentState, existingState = {}) {
     projects: mergeProjectsPreservingExisting(currentState.projects, existingState.projects, mergedRowsByProject),
     rowsByProject: mergedRowsByProject,
     deletedRowsByProject,
+    activityLog: [...new Map([
+      ...(currentState.activityLog || []),
+      ...(existingState.activityLog || []),
+    ].map((entry) => [entry.id, entry])).values()]
+      .sort((a, b) => clean(b.createdAt).localeCompare(clean(a.createdAt)))
+      .slice(0, 10000),
   };
 }
 
@@ -475,11 +534,43 @@ function setSyncStatus(message, mode = "local") {
 }
 
 function canEditSharedData() {
-  return Boolean(state.supabaseClient && state.cloudReady);
+  return Boolean(state.supabaseClient && state.cloudReady && ["admin", "editor"].includes(state.currentRole));
 }
 
 function sharedEditingDisabledMessage() {
+  if (state.currentUser && state.currentRole === "viewer") {
+    return "Your account has View Only access. Ask an administrator to change your role before editing.";
+  }
   return "Editing is disabled because the shared Supabase database is not connected. Refresh after Supabase is healthy, then try again.";
+}
+
+function actorLabel() {
+  return clean(state.currentUser?.email) || clean(state.userInitials).toUpperCase() || "User";
+}
+
+function valuesMatch(first, second) {
+  return JSON.stringify(first ?? null) === JSON.stringify(second ?? null);
+}
+
+function recordActivity(row, field, previousValue, nextValue, action = "updated") {
+  if (valuesMatch(previousValue, nextValue)) return;
+  state.activityLog.unshift({
+    id: `activity-${Date.now()}-${Math.floor(Math.random() * 1000000)}`,
+    projectId: state.activeProjectId,
+    rowKey: rowKey(row),
+    field,
+    action,
+    previousValue,
+    nextValue,
+    actor: actorLabel(),
+    initials: clean(state.userInitials).toUpperCase(),
+    createdAt: new Date().toISOString(),
+  });
+  state.activityLog = state.activityLog.slice(0, 10000);
+}
+
+function formattedSavedTime(date = new Date()) {
+  return date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
 function requireSharedEditing() {
@@ -569,8 +660,31 @@ function collectSharedState() {
     deletedRowsByProject: state.deletedRowsByProject,
     adminLists: state.adminLists,
     developmentNotes: state.developmentNotes,
+    activityLog: state.activityLog,
     updatedAt: new Date().toISOString(),
   };
+}
+
+function restorePendingSharedSave() {
+  const pending = safeJsonParse(localStorage.getItem(PENDING_SAVE_PREF_KEY), null);
+  if (!pending) return false;
+  const remoteState = {
+    projects: state.projects,
+    rowsByProject: state.rowsByProject,
+    deletedRowsByProject: state.deletedRowsByProject,
+    adminLists: state.adminLists,
+    developmentNotes: state.developmentNotes,
+    activityLog: state.activityLog,
+  };
+  const merged = normalizeSharedStateForSave(mergeSharedState(pending, remoteState));
+  state.projects = merged.projects || state.projects;
+  state.rowsByProject = merged.rowsByProject || state.rowsByProject;
+  state.deletedRowsByProject = merged.deletedRowsByProject || state.deletedRowsByProject;
+  state.adminLists = merged.adminLists || state.adminLists;
+  state.developmentNotes = merged.developmentNotes || state.developmentNotes;
+  state.activityLog = merged.activityLog || state.activityLog;
+  state.savePending = true;
+  return true;
 }
 
 function initializeSupabase() {
@@ -583,12 +697,95 @@ function initializeSupabase() {
   setSyncStatus("Connecting to Supabase...", "pending");
 }
 
+function showAuthGate(message = "") {
+  els.authGate.hidden = false;
+  els.appShell.hidden = true;
+  els.authMessage.textContent = message;
+}
+
+function hideAuthGate() {
+  els.authGate.hidden = true;
+  els.appShell.hidden = false;
+}
+
+async function loadCurrentUserRole() {
+  if (!state.currentUser || !state.supabaseClient) return;
+  const { data, error } = await state.supabaseClient
+    .from("equipment_material_user_roles")
+    .select("role")
+    .eq("user_id", state.currentUser.id)
+    .maybeSingle();
+  if (error) throw error;
+  state.currentRole = clean(data?.role).toLowerCase() || "viewer";
+  els.currentUserLabel.textContent = `${state.currentUser.email} · ${state.currentRole}`;
+}
+
+async function initializeAuthenticatedUser() {
+  if (!state.supabaseClient) return false;
+  const { data, error } = await state.supabaseClient.auth.getSession();
+  if (error) throw error;
+  state.currentUser = data.session?.user || null;
+  if (!state.currentUser) {
+    showAuthGate();
+    return false;
+  }
+  try {
+    await loadCurrentUserRole();
+  } catch (roleError) {
+    console.error(roleError);
+    showAuthGate("User access setup is not complete. Run the updated Supabase SQL, then refresh.");
+    return false;
+  }
+  hideAuthGate();
+  return true;
+}
+
+function bindAuthentication() {
+  els.authForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    els.authMessage.textContent = "Signing in...";
+    const { error } = await state.supabaseClient.auth.signInWithPassword({
+      email: clean(els.authEmail.value),
+      password: els.authPassword.value,
+    });
+    if (error) {
+      els.authMessage.textContent = error.message;
+      return;
+    }
+    location.reload();
+  });
+  els.createAccount.addEventListener("click", async () => {
+    if (!els.authEmail.checkValidity() || !els.authPassword.checkValidity()) {
+      els.authForm.reportValidity();
+      return;
+    }
+    els.authMessage.textContent = "Creating account...";
+    const { data, error } = await state.supabaseClient.auth.signUp({
+      email: clean(els.authEmail.value),
+      password: els.authPassword.value,
+      options: { emailRedirectTo: `${location.origin}${location.pathname}` },
+    });
+    if (error) {
+      els.authMessage.textContent = error.message;
+      return;
+    }
+    els.authMessage.textContent = data.session
+      ? "Account created. Loading the app..."
+      : "Account created. Check your email to confirm it, then sign in.";
+    if (data.session) location.reload();
+  });
+  els.signOut.addEventListener("click", async () => {
+    await state.supabaseClient.auth.signOut();
+    location.reload();
+  });
+}
+
 async function loadSharedState() {
   if (!state.supabaseClient) return false;
   try {
     const { data, error } = await state.supabaseClient
       .from("equipment_material_app_state")
-      .select("data")
+      .select("data, updated_at")
       .eq("id", "main")
       .maybeSingle();
     if (error) throw error;
@@ -604,9 +801,16 @@ async function loadSharedState() {
       });
       state.adminLists = shared.adminLists || state.adminLists;
       state.developmentNotes = Array.isArray(shared.developmentNotes) ? shared.developmentNotes : [];
+      state.activityLog = Array.isArray(shared.activityLog) ? shared.activityLog : [];
+      state.cloudUpdatedAt = data.updated_at || null;
       state.adminListsLoadedFromCloud = Boolean(shared.adminLists);
       state.cloudReady = true;
-      setSyncStatus("Shared database connected", "cloud");
+      if (restorePendingSharedSave() && ["admin", "editor"].includes(state.currentRole)) {
+        setSyncStatus("Recovering unsaved changes...", "pending");
+        setTimeout(saveSharedState, 0);
+      } else {
+        setSyncStatus("Shared database connected", "cloud");
+      }
     } else {
       state.rowsByProject = {
         [defaultProjects()[0].id]: state.baseRows.map((row) => ({ ...row })),
@@ -659,6 +863,9 @@ async function maybeMigrateLocalStorageToSupabase() {
 
 function queueSharedSave() {
   if (!canEditSharedData()) return;
+  state.savePending = true;
+  setSyncStatus("Saving...", "pending");
+  localStorage.setItem(PENDING_SAVE_PREF_KEY, JSON.stringify(normalizeSharedStateForSave(collectSharedState())));
   clearTimeout(state.cloudSaveTimer);
   state.cloudSaveTimer = setTimeout(() => {
     saveSharedState();
@@ -671,30 +878,67 @@ async function saveSharedState() {
     const currentState = normalizeSharedStateForSave(collectSharedState());
     const { data: existingData, error: readError } = await state.supabaseClient
       .from("equipment_material_app_state")
-      .select("data")
+      .select("data, updated_at")
       .eq("id", "main")
       .maybeSingle();
     if (readError) throw readError;
     const existingState = existingData?.data ? normalizeSharedStateForSave(existingData.data) : null;
+    if (existingData?.data) await ensureDailyBackup(existingData.data);
     const mergedState = normalizeSharedStateForSave(
       existingState ? mergeSharedState(currentState, existingState) : currentState,
     );
-    const { error } = await state.supabaseClient
-      .from("equipment_material_app_state")
-      .upsert({ id: "main", data: mergedState });
+    let savedRecord;
+    let error;
+    if (existingData) {
+      let request = state.supabaseClient
+        .from("equipment_material_app_state")
+        .update({ data: mergedState })
+        .eq("id", "main");
+      if (existingData.updated_at) request = request.eq("updated_at", existingData.updated_at);
+      ({ data: savedRecord, error } = await request.select("updated_at").maybeSingle());
+    } else {
+      ({ data: savedRecord, error } = await state.supabaseClient
+        .from("equipment_material_app_state")
+        .insert({ id: "main", data: mergedState })
+        .select("updated_at")
+        .single());
+    }
     if (error) throw error;
+    if (!savedRecord) {
+      setSyncStatus("Another user saved changes. Merging updates...", "pending");
+      clearTimeout(state.cloudRetryTimer);
+      state.cloudRetryTimer = setTimeout(saveSharedState, 400);
+      return;
+    }
     state.projects = mergedState.projects || state.projects;
     state.rowsByProject = mergedState.rowsByProject || state.rowsByProject;
     state.deletedRowsByProject = mergedState.deletedRowsByProject || state.deletedRowsByProject;
-    setSyncStatus("Shared database saved", "cloud");
+    state.activityLog = mergedState.activityLog || state.activityLog;
+    state.cloudUpdatedAt = savedRecord.updated_at;
+    state.savePending = false;
+    localStorage.removeItem(PENDING_SAVE_PREF_KEY);
+    setSyncStatus(`Saved ${formattedSavedTime()}`, "cloud");
   } catch (error) {
     console.error(error);
-    state.cloudReady = false;
-    state.supabaseClient = null;
     const detail = clean(error?.message || error?.details || error?.code);
-    setSyncStatus(detail ? `Shared database save failed - ${detail}` : "Shared database save failed", "local");
-    render();
+    state.savePending = true;
+    setSyncStatus(detail ? `Save pending - ${detail}` : "Save pending - reconnecting", "local");
+    clearTimeout(state.cloudRetryTimer);
+    state.cloudRetryTimer = setTimeout(saveSharedState, 5000);
   }
+}
+
+async function ensureDailyBackup(sharedData) {
+  if (!state.supabaseClient || !["admin", "editor"].includes(state.currentRole)) return;
+  const today = new Date().toISOString().slice(0, 10);
+  if (localStorage.getItem("equipmentMaterialLastBackupDate") === today) return;
+  const { error } = await state.supabaseClient.from("equipment_material_backups").insert({
+    backup_date: today,
+    created_by: actorLabel(),
+    data: sharedData,
+  });
+  if (error && error.code !== "23505") throw error;
+  localStorage.setItem("equipmentMaterialLastBackupDate", today);
 }
 
 function saveProjects() {
@@ -1082,9 +1326,20 @@ function fileSizeLabel(bytes) {
 
 function submittalFileUrl(file) {
   if (clean(file?.url)) return clean(file.url);
+  return "";
+}
+
+async function openSubmittalFile(file) {
   const path = clean(file?.path);
-  if (!path || !state.supabaseClient) return "";
-  return state.supabaseClient.storage.from(SUBMITTAL_FILE_BUCKET).getPublicUrl(path).data.publicUrl || "";
+  if (!path || !state.supabaseClient) return;
+  const { data, error } = await state.supabaseClient.storage
+    .from(SUBMITTAL_FILE_BUCKET)
+    .createSignedUrl(path, 300);
+  if (error || !data?.signedUrl) {
+    alert(`The file could not be opened: ${error?.message || "signed link unavailable"}`);
+    return;
+  }
+  window.open(data.signedUrl, "_blank", "noopener");
 }
 
 function calculatedExpectedDelivery(row) {
@@ -1136,6 +1391,7 @@ function loadSavedEdits() {
 
 function saveCellEdit(row, header, value) {
   if (!requireSharedEditing()) return;
+  const previousValue = row[header];
   let saved = {};
   try {
     saved = JSON.parse(localStorage.getItem(EDIT_PREF_KEY) || "{}");
@@ -1146,6 +1402,10 @@ function saveCellEdit(row, header, value) {
   const key = rowKey(row);
   saved[key] = { ...(saved[key] || {}), [header]: value };
   row[header] = value;
+  row._updatedAt = new Date().toISOString();
+  row._updatedBy = actorLabel();
+  row._fieldUpdatedAt = { ...(row._fieldUpdatedAt || {}), [header]: row._updatedAt };
+  recordActivity(row, header, previousValue, value);
   if ([FIELD.released, FIELD.lead].includes(header)) {
     applyExpectedDeliveryCalculation(row, saved[key], true);
   }
@@ -1238,6 +1498,7 @@ function addItem() {
     row[header] = [FIELD.critical, FIELD.delivered].includes(header) ? false : null;
   });
   state.rows.unshift(row);
+  recordActivity(row, "Item", null, "New item", "created");
   saveAddedItems();
   saveRowOrder();
   els.search.value = "";
@@ -1281,6 +1542,7 @@ function insertItemNearRow(targetRowKey, position) {
     ? 0
     : targetIndex + (position === "below" ? 1 : 0);
   state.rows.splice(insertIndex, 0, row);
+  recordActivity(row, "Item", null, "Inserted item", "created");
   saveAddedItems();
   saveRowOrder();
   clearLogPlacementFilters();
@@ -1295,6 +1557,7 @@ function removeItem(rowKeyValue) {
   const row = state.rows.find((candidate) => rowKey(candidate) === rowKeyValue);
   const label = clean(row?.[FIELD.tag]) || clean(row?.[FIELD.item]) || "this item";
   if (!confirm(`Remove ${label} from the log?`)) return;
+  recordActivity(row, "Item", label, null, "removed");
   state.deletedRowKeys.add(rowKeyValue);
   state.selectedBulkRows.delete(rowKeyValue);
   state.rows = state.rows.filter((candidate) => rowKey(candidate) !== rowKeyValue);
@@ -1839,6 +2102,7 @@ async function attachSubmittalFile(row, file) {
       type: file.type,
       uploadedAt: new Date().toISOString(),
     });
+    recordActivity(row, FIELD.submittalFiles, null, file.name, "attached");
     saveCellEdit(row, FIELD.submittalFiles, files);
     state.filtered = state.rows.filter(matchesFilters);
     renderLog();
@@ -1864,6 +2128,7 @@ async function removeSubmittalFile(row, index) {
       if (error) throw error;
     }
     files.splice(index, 1);
+    recordActivity(row, FIELD.submittalFiles, file.name, null, "removed");
     saveCellEdit(row, FIELD.submittalFiles, files);
     state.filtered = state.rows.filter(matchesFilters);
     renderLog();
@@ -2494,6 +2759,86 @@ function saveLogControls() {
   localStorage.setItem(LOG_SORT_PREF_KEY, JSON.stringify(state.logSort));
 }
 
+function savedViewsStorageKey() {
+  return `${SAVED_VIEWS_PREF_KEY}:${state.currentUser?.id || "local"}`;
+}
+
+function loadSavedViews() {
+  state.savedViews = safeJsonParse(localStorage.getItem(savedViewsStorageKey()), []);
+  renderSavedViews();
+}
+
+function renderSavedViews() {
+  if (!els.savedViewSelect) return;
+  const current = els.savedViewSelect.value;
+  els.savedViewSelect.innerHTML = `<option value="">Saved Views</option>${state.savedViews.map((view) => (
+    `<option value="${escapeHtml(view.id)}">${escapeHtml(view.name)}</option>`
+  )).join("")}`;
+  if (state.savedViews.some((view) => view.id === current)) els.savedViewSelect.value = current;
+  els.deleteView.disabled = !els.savedViewSelect.value;
+}
+
+function saveCurrentView() {
+  const name = clean(prompt("Name this saved view:"));
+  if (!name) return;
+  const existing = state.savedViews.find((view) => normalizeKey(view.name) === normalizeKey(name));
+  const view = {
+    id: existing?.id || `view-${Date.now()}`,
+    name,
+    projectId: state.activeProjectId,
+    search: els.search.value,
+    status: els.status.value,
+    area: els.area.value,
+    provider: els.provider.value,
+    timing: els.timing.value,
+    columnFilters: state.logColumnFilters,
+    sort: state.logSort,
+    hiddenColumns: [...state.hiddenColumns],
+    columnOrder: state.columnOrder,
+    columnWidths: state.columnWidths,
+  };
+  state.savedViews = existing
+    ? state.savedViews.map((item) => item.id === existing.id ? view : item)
+    : [...state.savedViews, view];
+  localStorage.setItem(savedViewsStorageKey(), JSON.stringify(state.savedViews));
+  renderSavedViews();
+  els.savedViewSelect.value = view.id;
+  els.deleteView.disabled = false;
+}
+
+function applySavedView(viewId) {
+  const view = state.savedViews.find((item) => item.id === viewId);
+  if (!view) return;
+  if (view.projectId && view.projectId !== state.activeProjectId) loadProject(view.projectId);
+  els.search.value = view.search || "";
+  els.status.value = view.status || "all";
+  els.area.value = view.area || "all";
+  els.provider.value = view.provider || "all";
+  els.timing.value = view.timing || "all";
+  state.logColumnFilters = view.columnFilters || {};
+  state.logSort = view.sort || { column: null, direction: "asc" };
+  state.hiddenColumns = new Set(view.hiddenColumns || []);
+  state.columnOrder = view.columnOrder || [];
+  state.columnWidths = view.columnWidths || {};
+  saveLogControls();
+  saveColumnPrefs();
+  localStorage.setItem(COLUMN_ORDER_PREF_KEY, JSON.stringify(state.columnOrder));
+  localStorage.setItem(COLUMN_WIDTH_PREF_KEY, JSON.stringify(state.columnWidths));
+  state.filtered = state.rows.filter(matchesFilters);
+  renderColumnMenu();
+  render();
+  setView("log");
+}
+
+function deleteSavedView() {
+  const id = els.savedViewSelect.value;
+  const view = state.savedViews.find((item) => item.id === id);
+  if (!view || !confirm(`Delete the saved view "${view.name}"?`)) return;
+  state.savedViews = state.savedViews.filter((item) => item.id !== id);
+  localStorage.setItem(savedViewsStorageKey(), JSON.stringify(state.savedViews));
+  renderSavedViews();
+}
+
 function syncTopScrollbarWidth() {
   if (!els.tableShell || !els.tableScrollTopInner) return;
   els.tableScrollTopInner.style.width = `${els.tableShell.scrollWidth}px`;
@@ -2966,6 +3311,8 @@ function moveLogFieldWithArrow(event, rowKeyValue, header) {
 
 function bindLogFieldTabbing() {
   els.logBody.querySelectorAll("[data-log-field-row]").forEach((control) => {
+    control.addEventListener("focus", () => markActiveEditing(control.dataset.logFieldRow, control.dataset.logFieldColumn));
+    control.addEventListener("blur", () => clearActiveEditing());
     if (control.isContentEditable) return;
     if (control.matches("[data-provider-row]")) return;
     control.addEventListener("keydown", (event) => {
@@ -2976,6 +3323,54 @@ function bindLogFieldTabbing() {
       }
     });
   });
+}
+
+function editingPresenceList() {
+  if (!state.editingChannel) return [];
+  return Object.values(state.editingChannel.presenceState())
+    .flat()
+    .filter((presence) => presence?.rowKey && presence.userId !== state.currentUser?.id);
+}
+
+function updateEditingIndicators() {
+  state.activeEditors = editingPresenceList();
+  els.logBody?.querySelectorAll("tr[data-row-key]").forEach((rowElement) => {
+    const editors = state.activeEditors.filter((presence) => (
+      presence.projectId === state.activeProjectId && presence.rowKey === rowElement.dataset.rowKey
+    ));
+    rowElement.classList.toggle("is-being-edited", editors.length > 0);
+    const indicator = rowElement.querySelector("[data-editing-indicator]");
+    if (indicator) indicator.textContent = editors.length ? `${editors[0].email || "Another user"} editing` : "";
+  });
+}
+
+async function markActiveEditing(rowKeyValue, field) {
+  if (!state.editingChannel) return;
+  await state.editingChannel.track({
+    userId: state.currentUser?.id,
+    email: state.currentUser?.email,
+    projectId: state.activeProjectId,
+    rowKey: rowKeyValue,
+    field,
+    onlineAt: new Date().toISOString(),
+  });
+}
+
+async function clearActiveEditing() {
+  if (!state.editingChannel) return;
+  await state.editingChannel.track({ userId: state.currentUser?.id, email: state.currentUser?.email, rowKey: "" });
+}
+
+function initializeEditingPresence() {
+  if (!state.supabaseClient || !state.currentUser) return;
+  state.editingChannel = state.supabaseClient.channel("equipment-material-editing", {
+    config: { presence: { key: state.currentUser.id } },
+  });
+  state.editingChannel
+    .on("presence", { event: "sync" }, updateEditingIndicators)
+    .subscribe(async (status) => {
+      if (status === "SUBSCRIBED") await clearActiveEditing();
+    });
 }
 
 function commitEditableCell(cell) {
@@ -3183,6 +3578,7 @@ function saveDeliveryDialog() {
   const deliveries = rowDeliveries(row);
   const index = state.deliveryEditor.index;
   const existing = index === null ? {} : deliveries[index] || {};
+  const previousDelivery = index === null ? null : { ...existing };
   const delivery = deliveryDetailsFromForm(existing);
   if (index === null) {
     deliveries.push({
@@ -3192,6 +3588,7 @@ function saveDeliveryDialog() {
   } else {
     deliveries[index] = delivery;
   }
+  recordActivity(row, FIELD.deliveries, previousDelivery, delivery, index === null ? "added" : "updated");
   closeDeliveryDialog();
   saveDeliveryChanges(row);
 }
@@ -3225,6 +3622,7 @@ function removeDelivery(row, index) {
   if (!delivery) return;
   const label = clean(delivery.ticketNumber) || formattedDeliveryDate(delivery) || `delivery ${index + 1}`;
   if (!confirm(`Remove ${label}?`)) return;
+  recordActivity(row, FIELD.deliveries, delivery, null, "removed");
   deliveries.splice(index, 1);
   saveDeliveryChanges(row);
 }
@@ -3317,7 +3715,7 @@ function renderSubmittalFilesCell(row, header = FIELD.submittalFiles) {
           const url = submittalFileUrl(file);
           return `
             <div class="submittal-file-entry">
-              ${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(clean(file.name) || "Submittal file")}</a>` : `<span>${escapeHtml(clean(file.name) || "Submittal file")}</span>`}
+              ${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(clean(file.name) || "Submittal file")}</a>` : `<button class="submittal-file-link" type="button" data-open-submittal-file-row="${escapeHtml(key)}" data-file-index="${index}">${escapeHtml(clean(file.name) || "Submittal file")}</button>`}
               <div class="meta">${escapeHtml([fileSizeLabel(file.size), clean(file.type)].filter(Boolean).join(" · "))}</div>
               <button class="note-edit-button danger" type="button" data-remove-submittal-file-row="${escapeHtml(key)}" data-file-index="${index}" ${disabled}>Remove</button>
             </div>
@@ -3384,13 +3782,15 @@ function renderLogBody() {
   const editableAttribute = editingEnabled ? "true" : "false";
   const editableTabIndex = editingEnabled ? "0" : "-1";
   els.logBody.innerHTML = rows.map((row) => `
-    <tr>
+    <tr data-row-key="${escapeHtml(rowKey(row))}">
       <td class="action-cell" style="width: ${ACTION_COLUMN_WIDTH}px; min-width: ${ACTION_COLUMN_WIDTH}px; max-width: ${ACTION_COLUMN_WIDTH}px;">
         <label class="bulk-row-select" title="Select row for bulk edit">
           <input type="checkbox" data-bulk-row="${escapeHtml(rowKey(row))}" aria-label="Select row for bulk edit" ${state.selectedBulkRows.has(rowKey(row)) ? "checked" : ""} ${disabled} />
         </label>
+        <button class="icon-row-button view-row-button" type="button" data-view-row="${escapeHtml(rowKey(row))}" aria-label="View item details" title="View item details">i</button>
         <button class="icon-row-button remove-row-button" type="button" data-remove-row="${escapeHtml(rowKey(row))}" aria-label="Remove item" title="Remove item" ${disabled}>×</button>
         <button class="icon-row-button insert-row-button" type="button" data-insert-row="${escapeHtml(rowKey(row))}" data-insert-position="below" aria-label="Insert row below" title="Insert row below" ${disabled}>+</button>
+        <small class="editing-indicator" data-editing-indicator></small>
       </td>
       ${headers.map((header) => {
         const display = displayValue(row, header);
@@ -3443,9 +3843,11 @@ function renderLogBody() {
   bindSubmittalFileButtons();
   bindInsertButtons();
   bindRemoveButtons();
+  bindItemDetailButtons();
   bindBulkRowSelection();
   renderBulkEditPanel();
   updateSharedEditingControls();
+  updateEditingIndicators();
   syncTopScrollbarWidth();
 }
 
@@ -3464,6 +3866,13 @@ function bindBulkRowSelection() {
 }
 
 function bindSubmittalFileButtons() {
+  els.logBody.querySelectorAll("[data-open-submittal-file-row]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const row = state.rows.find((candidate) => rowKey(candidate) === button.dataset.openSubmittalFileRow);
+      const file = row ? submittalFiles(row[FIELD.submittalFiles])[Number(button.dataset.fileIndex)] : null;
+      if (file) openSubmittalFile(file);
+    });
+  });
   els.logBody.querySelectorAll("[data-attach-submittal-row]").forEach((input) => {
     input.addEventListener("change", async () => {
       const row = state.rows.find((candidate) => rowKey(candidate) === input.dataset.attachSubmittalRow);
@@ -3596,6 +4005,112 @@ function renderLog() {
   if (table) table.style.width = `${tableWidth()}px`;
   renderLogHead();
   renderLogBody();
+}
+
+function activityDisplayValue(value) {
+  if (value === null || value === undefined || value === "") return "Blank";
+  if (Array.isArray(value)) return `${value.length} record${value.length === 1 ? "" : "s"}`;
+  if (typeof value === "object") return "Updated information";
+  return clean(value);
+}
+
+function itemActivity(row) {
+  const key = rowKey(row);
+  return state.activityLog
+    .filter((entry) => entry.projectId === state.activeProjectId && entry.rowKey === key)
+    .sort((a, b) => clean(b.createdAt).localeCompare(clean(a.createdAt)));
+}
+
+function openItemDetails(row) {
+  state.detailRowKey = rowKey(row);
+  els.itemDetailsTitle.textContent = clean(row[FIELD.item]) || "Item Details";
+  els.itemDetailsSubtitle.textContent = [clean(row[FIELD.tag]), clean(row[FIELD.provider]), clean(row[FIELD.area])].filter(Boolean).join(" · ");
+  const history = itemActivity(row);
+  els.itemDetailsContent.innerHTML = `
+    <section class="item-details-grid">
+      ${logHeaders().filter((header) => ![FIELD.notes, FIELD.deliveries, FIELD.submittalFiles].includes(header)).map((header) => `
+        <div><span>${escapeHtml(header)}</span><strong>${escapeHtml(displayValue(row, header) || "—")}</strong></div>
+      `).join("")}
+    </section>
+    <section class="item-history">
+      <h4>Change History</h4>
+      ${history.map((entry) => `
+        <article>
+          <div><strong>${escapeHtml(entry.field || entry.action)}</strong><span>${escapeHtml(formatNoteTimestamp(new Date(entry.createdAt)))} · ${escapeHtml(entry.actor || "User")}</span></div>
+          <p>${escapeHtml(activityDisplayValue(entry.previousValue))} → ${escapeHtml(activityDisplayValue(entry.nextValue))}</p>
+          ${canEditSharedData() && entry.field && ![FIELD.deliveries, FIELD.submittalFiles].includes(entry.field)
+            ? `<button class="text-button neutral" type="button" data-restore-activity="${escapeHtml(entry.id)}">Restore previous value</button>`
+            : ""}
+        </article>
+      `).join("") || `<p class="empty">No recorded changes yet.</p>`}
+    </section>
+  `;
+  els.itemDetailsContent.querySelectorAll("[data-restore-activity]").forEach((button) => {
+    button.addEventListener("click", () => restoreActivityValue(button.dataset.restoreActivity));
+  });
+  if (!els.itemDetailsDialog.open) els.itemDetailsDialog.showModal();
+}
+
+function restoreActivityValue(activityId) {
+  if (!requireSharedEditing()) return;
+  const entry = state.activityLog.find((item) => item.id === activityId);
+  const row = state.rows.find((item) => rowKey(item) === state.detailRowKey);
+  if (!entry || !row || !confirm(`Restore the previous ${entry.field} value?`)) return;
+  saveCellEdit(row, entry.field, entry.previousValue);
+  state.filtered = state.rows.filter(matchesFilters);
+  render();
+  openItemDetails(row);
+}
+
+function bindItemDetailButtons() {
+  els.logBody.querySelectorAll("[data-view-row]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const row = state.rows.find((candidate) => rowKey(candidate) === button.dataset.viewRow);
+      if (row) openItemDetails(row);
+    });
+  });
+}
+
+function projectAlerts() {
+  const today = todayExcelSerial();
+  const alerts = [];
+  state.projects.filter((project) => !project.archived).forEach((project) => {
+    (state.rowsByProject[project.id] || []).forEach((row) => {
+      const base = { projectId: project.id, projectName: project.name, rowKey: rowKey(row), row };
+      const scheduled = numeric(row[FIELD.scheduledRelease]);
+      const expectedDelivery = numeric(row[FIELD.delivery]);
+      const required = numeric(row[FIELD.required]);
+      const submittalExpected = numeric(row[FIELD.submittalReturnExpected]);
+      if (scheduled !== null && scheduled < today && !clean(row[FIELD.released])) alerts.push({ ...base, type: "Scheduled release overdue" });
+      if (expectedDelivery !== null && required !== null && expectedDelivery > required) alerts.push({ ...base, type: "Delivery later than required date" });
+      if (submittalExpected !== null && submittalExpected < today && !clean(row[FIELD.submittalReturnActual])) alerts.push({ ...base, type: "Submittal return overdue" });
+      if (required !== null && required >= today && required <= today + 30 && !row[FIELD.delivered]) alerts.push({ ...base, type: "Required onsite within 30 days" });
+    });
+  });
+  return alerts;
+}
+
+function renderAlerts() {
+  const alerts = projectAlerts();
+  els.alertCount.textContent = alerts.length;
+  els.alertsList.innerHTML = alerts.map((alert) => `
+    <button type="button" data-alert-project="${escapeHtml(alert.projectId)}" data-alert-row="${escapeHtml(alert.rowKey)}">
+      <strong>${escapeHtml(alert.type)}</strong>
+      <span>${escapeHtml(clean(alert.row[FIELD.item]) || clean(alert.row[FIELD.tag]) || "Material item")}</span>
+      <small>${escapeHtml(alert.projectName)}</small>
+    </button>
+  `).join("") || `<p class="empty">No active alerts.</p>`;
+  els.alertsList.querySelectorAll("[data-alert-project]").forEach((button) => {
+    button.addEventListener("click", () => {
+      loadProject(button.dataset.alertProject);
+      const row = state.rows.find((item) => rowKey(item) === button.dataset.alertRow);
+      els.search.value = clean(row?.[FIELD.tag]) || clean(row?.[FIELD.item]);
+      state.filtered = state.rows.filter(matchesFilters);
+      render();
+      setView("log");
+      els.alertsDialog.close();
+    });
+  });
 }
 
 function procurementBucket(row) {
@@ -3945,6 +4460,109 @@ function renderProjectList() {
   });
 }
 
+async function loadUserRoles() {
+  if (state.currentRole !== "admin") {
+    state.userRoles = [];
+    return;
+  }
+  const { data, error } = await state.supabaseClient
+    .from("equipment_material_user_roles")
+    .select("user_id, email, role, created_at")
+    .order("email");
+  if (error) throw error;
+  state.userRoles = data || [];
+}
+
+async function loadBackups() {
+  if (state.currentRole !== "admin") {
+    state.backups = [];
+    return;
+  }
+  const { data, error } = await state.supabaseClient
+    .from("equipment_material_backups")
+    .select("id, backup_date, created_at, created_by")
+    .order("backup_date", { ascending: false })
+    .limit(30);
+  if (error) throw error;
+  state.backups = data || [];
+}
+
+async function restoreBackup(backupId) {
+  if (state.currentRole !== "admin") return;
+  const backup = state.backups.find((item) => item.id === backupId);
+  if (!backup || !confirm(`Restore all app data to the ${backup.backup_date} snapshot? A new safety snapshot will be created first.`)) return;
+  const { data: current } = await state.supabaseClient.from("equipment_material_app_state").select("data").eq("id", "main").single();
+  if (current?.data) {
+    const safetyDate = new Date().toISOString().slice(0, 10);
+    await state.supabaseClient.from("equipment_material_backups").insert({
+      backup_date: `${safetyDate}-restore-${Date.now()}`,
+      created_by: `${actorLabel()} before restore`,
+      data: current.data,
+    });
+  }
+  const { data, error } = await state.supabaseClient.from("equipment_material_backups").select("data").eq("id", backupId).single();
+  if (error) {
+    alert(`Snapshot could not be loaded: ${error.message}`);
+    return;
+  }
+  const { error: restoreError } = await state.supabaseClient.from("equipment_material_app_state").update({ data: data.data }).eq("id", "main");
+  if (restoreError) {
+    alert(`Snapshot could not be restored: ${restoreError.message}`);
+    return;
+  }
+  location.reload();
+}
+
+async function updateUserRole(userId, role) {
+  if (state.currentRole !== "admin") return;
+  const { error } = await state.supabaseClient
+    .from("equipment_material_user_roles")
+    .update({ role })
+    .eq("user_id", userId);
+  if (error) {
+    alert(`User access could not be updated: ${error.message}`);
+    return;
+  }
+  await loadUserRoles();
+  await loadBackups();
+  initializeEditingPresence();
+  renderUserAccess();
+}
+
+function renderUserAccess() {
+  if (!els.userAccessPanel) return;
+  els.userAccessPanel.hidden = state.currentRole !== "admin";
+  if (state.currentRole !== "admin") return;
+  els.userAccessCount.textContent = `${state.userRoles.length} users`;
+  els.userAccessList.innerHTML = state.userRoles.map((user) => `
+    <div class="admin-row">
+      <span>${escapeHtml(user.email)}</span>
+      <select data-user-role="${escapeHtml(user.user_id)}" ${user.user_id === state.currentUser?.id ? "disabled" : ""}>
+        ${["viewer", "editor", "admin"].map((role) => `<option value="${role}" ${user.role === role ? "selected" : ""}>${role}</option>`).join("")}
+      </select>
+    </div>
+  `).join("") || `<p class="empty">No users have signed up yet.</p>`;
+  els.userAccessList.querySelectorAll("[data-user-role]").forEach((select) => {
+    select.addEventListener("change", () => updateUserRole(select.dataset.userRole, select.value));
+  });
+}
+
+function renderBackups() {
+  if (!els.backupPanel) return;
+  els.backupPanel.hidden = state.currentRole !== "admin";
+  if (state.currentRole !== "admin") return;
+  els.backupCount.textContent = `${state.backups.length} snapshots`;
+  els.backupList.innerHTML = state.backups.map((backup) => `
+    <div class="admin-row">
+      <span>${escapeHtml(backup.backup_date)}<small>${escapeHtml(backup.created_by || "Automatic")}</small></span>
+      <button class="text-button neutral" type="button" data-restore-backup="${escapeHtml(backup.id)}">Restore</button>
+    </div>
+  `).join("") || `<p class="empty">The first daily snapshot will be created when an edit is saved.</p>`;
+  els.backupList.querySelectorAll("[data-restore-backup]").forEach((button) => {
+    button.addEventListener("click", () => restoreBackup(button.dataset.restoreBackup));
+  });
+}
+
 function renderAdmin() {
   renderProjectList();
   els.userInitialsInput.value = state.userInitials;
@@ -3952,6 +4570,8 @@ function renderAdmin() {
   els.statusAdminCount.textContent = `${state.adminLists.statuses.length} values`;
   renderAdminList(els.supplierList, "suppliers", state.adminLists.suppliers);
   renderAdminList(els.statusAdminList, "statuses", state.adminLists.statuses);
+  renderUserAccess();
+  renderBackups();
 
   document.querySelectorAll("[data-remove-list]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -3974,6 +4594,7 @@ function render() {
   renderProviderReport();
   renderDevelopmentNotes();
   renderAdmin();
+  renderAlerts();
   updateSharedEditingControls();
 }
 
@@ -4029,8 +4650,11 @@ async function init() {
   state.baseRows = state.data.sheets[0].rows.map((row) => ({ ...row }));
   loadProjects();
   initializeSupabase();
+  bindAuthentication();
+  if (!await initializeAuthenticatedUser()) return;
   const didMigrate = await maybeMigrateLocalStorageToSupabase();
   await loadSharedState();
+  await loadUserRoles();
   state.activeProjectId = localStorage.getItem(ACTIVE_PROJECT_PREF_KEY) || state.projects[0].id;
   if (!state.projects.some((project) => project.id === state.activeProjectId)) {
     state.activeProjectId = state.projects[0].id;
@@ -4048,6 +4672,7 @@ async function init() {
   loadAdminLists();
   loadDevelopmentNotes();
   state.userInitials = clean(localStorage.getItem(INITIALS_PREF_KEY)).toUpperCase();
+  loadSavedViews();
   state.filtered = state.rows;
   const initialView = location.hash.slice(1) || localStorage.getItem("equipmentMaterialActiveView") || "dashboard";
   try {
@@ -4133,6 +4758,20 @@ async function init() {
   els.exportExcel.addEventListener("click", exportMaterialLog);
 
   els.printLog.addEventListener("click", printMaterialLog);
+
+  els.saveView.addEventListener("click", saveCurrentView);
+  els.savedViewSelect.addEventListener("change", () => {
+    els.deleteView.disabled = !els.savedViewSelect.value;
+    if (els.savedViewSelect.value) applySavedView(els.savedViewSelect.value);
+  });
+  els.deleteView.addEventListener("click", deleteSavedView);
+
+  els.alertsButton.addEventListener("click", () => {
+    renderAlerts();
+    els.alertsDialog.showModal();
+  });
+  els.alertsClose.addEventListener("click", () => els.alertsDialog.close());
+  els.itemDetailsClose.addEventListener("click", () => els.itemDetailsDialog.close());
 
   els.reportProject.addEventListener("change", renderProviderReport);
   els.reportProvider.addEventListener("change", renderProviderReport);
