@@ -26,6 +26,7 @@ const FIELD = {
   submittalReviewActual: "SUBMITTAL REVIEW DURATION - ACTUAL",
   status: "SUBMITTAL STATUS",
   scheduledRelease: "SCHEDULED RELEASE DATE",
+  isReleased: "Released",
   released: "DATE RELEASED",
   lead: "LEAD TIME (DAYS)",
   delivery: "EXPECTED DELIVERY",
@@ -1214,7 +1215,7 @@ function editableValue(row, header) {
 
 function normalizeEditedValue(header, value) {
   const text = clean(value);
-  if (!text) return [FIELD.critical, FIELD.delivered].includes(header) ? false : null;
+  if (!text) return [FIELD.isReleased, FIELD.critical, FIELD.delivered].includes(header) ? false : null;
   if ([FIELD.dateSubmitted, FIELD.submittalReturnExpected, FIELD.submittalReturnActual, FIELD.scheduledRelease, FIELD.released, FIELD.delivery, FIELD.required].includes(header)) {
     return excelSerialFromDate(text);
   }
@@ -1226,7 +1227,7 @@ function normalizeEditedValue(header, value) {
     const valueNumber = Number(text.replace(/[$,]/g, ""));
     return Number.isFinite(valueNumber) ? valueNumber : text;
   }
-  if ([FIELD.critical, FIELD.delivered].includes(header)) return Boolean(value);
+  if ([FIELD.isReleased, FIELD.critical, FIELD.delivered].includes(header)) return Boolean(value);
   return text;
 }
 
@@ -1343,10 +1344,13 @@ async function openSubmittalFile(file) {
 }
 
 function calculatedExpectedDelivery(row) {
-  const released = numeric(row[FIELD.released]);
   const lead = numeric(row[FIELD.lead]);
-  if (released === null || lead === null) return null;
-  return released + lead;
+  if (lead === null) return null;
+  const released = numeric(row[FIELD.released]);
+  if (row[FIELD.isReleased] && released !== null) return released + lead;
+  const scheduledRelease = numeric(row[FIELD.scheduledRelease]);
+  if (scheduledRelease === null) return null;
+  return scheduledRelease + lead;
 }
 
 function calculatedSubmittalReturnExpected(row) {
@@ -1406,7 +1410,7 @@ function saveCellEdit(row, header, value) {
   row._updatedBy = actorLabel();
   row._fieldUpdatedAt = { ...(row._fieldUpdatedAt || {}), [header]: row._updatedAt };
   recordActivity(row, header, previousValue, value);
-  if ([FIELD.released, FIELD.lead].includes(header)) {
+  if ([FIELD.scheduledRelease, FIELD.isReleased, FIELD.released, FIELD.lead].includes(header)) {
     applyExpectedDeliveryCalculation(row, saved[key], true);
   }
   if ([FIELD.dateSubmitted, FIELD.submittalReviewExpected].includes(header)) {
@@ -1495,7 +1499,7 @@ function addItem() {
   if (!requireSharedEditing()) return;
   const row = { _rowNumber: `new-${Date.now()}` };
   allTableHeaders().forEach((header) => {
-    row[header] = [FIELD.critical, FIELD.delivered].includes(header) ? false : null;
+    row[header] = [FIELD.isReleased, FIELD.critical, FIELD.delivered].includes(header) ? false : null;
   });
   state.rows.unshift(row);
   recordActivity(row, "Item", null, "New item", "created");
@@ -1529,7 +1533,7 @@ function clearLogPlacementFilters() {
 function createBlankItem() {
   const row = { _rowNumber: `new-${Date.now()}-${Math.floor(Math.random() * 1000)}` };
   allTableHeaders().forEach((header) => {
-    row[header] = [FIELD.critical, FIELD.delivered].includes(header) ? false : null;
+    row[header] = [FIELD.isReleased, FIELD.critical, FIELD.delivered].includes(header) ? false : null;
   });
   return row;
 }
@@ -1638,7 +1642,7 @@ function exportValue(row, header) {
       .map((file) => [clean(file.name), submittalFileUrl(file)].filter(Boolean).join(" - "))
       .join("\n");
   }
-  if ([FIELD.critical, FIELD.delivered].includes(header)) return row[header] ? "Yes" : "No";
+  if ([FIELD.isReleased, FIELD.critical, FIELD.delivered].includes(header)) return row[header] ? "Yes" : "No";
   if (header === FIELD.notes) return notesForExport(row[FIELD.notes]);
   if (header === FIELD.unitPricePo) return formattedDeliveryMoney(row[header]);
   if ([FIELD.dateSubmitted, FIELD.submittalReturnExpected, FIELD.submittalReturnActual, FIELD.scheduledRelease, FIELD.released, FIELD.delivery, FIELD.required].includes(header)) return excelDate(row[header]) || "";
@@ -1942,8 +1946,8 @@ function importedValue(header, value) {
   const text = clean(value);
   if ([FIELD.qtyDelivered, FIELD.deliveries].includes(header)) return null;
   if (header === FIELD.submittalFiles) return [];
-  if (!text) return [FIELD.critical, FIELD.delivered].includes(header) ? false : null;
-  if ([FIELD.critical, FIELD.delivered].includes(header)) return ["YES", "TRUE", "Y", "1", "CRITICAL", "DELIVERED"].includes(normalizeKey(text));
+  if (!text) return [FIELD.isReleased, FIELD.critical, FIELD.delivered].includes(header) ? false : null;
+  if ([FIELD.isReleased, FIELD.critical, FIELD.delivered].includes(header)) return ["YES", "TRUE", "Y", "1", "RELEASED", "CRITICAL", "DELIVERED"].includes(normalizeKey(text));
   if (header === FIELD.provider) {
     return canonicalSupplierName(text) || text;
   }
@@ -1975,7 +1979,7 @@ function rowsFromImportGrid(grid) {
     applyExpectedDeliveryCalculation(row);
     applySubmittalReturnCalculation(row);
     return row;
-  }).filter((row) => expectedHeaders.some((header) => ![FIELD.critical, FIELD.delivered, FIELD.qtyDelivered, FIELD.deliveries].includes(header) && clean(row[header])));
+  }).filter((row) => expectedHeaders.some((header) => ![FIELD.isReleased, FIELD.critical, FIELD.delivered, FIELD.qtyDelivered, FIELD.deliveries].includes(header) && clean(row[header])));
 }
 
 async function importMaterialLog() {
@@ -2625,6 +2629,7 @@ function displayValue(row, header) {
   if (header === FIELD.qtyDelivered) return quantityDelivered(row);
   if (header === FIELD.deliveries) return deliveriesForExport(row);
   if (header === FIELD.submittalFiles) return submittalFiles(value).map((file) => clean(file.name)).filter(Boolean).join(", ");
+  if (header === FIELD.isReleased) return value ? "Released" : "";
   if (header === FIELD.critical) return value ? "Critical" : "";
   if (header === FIELD.delivered) return value ? "Delivered" : "";
   if (header === FIELD.unitPricePo) return clean(value) ? formattedDeliveryMoney(value) : "";
@@ -2633,6 +2638,7 @@ function displayValue(row, header) {
 
 function sortValue(row, header) {
   if (header === FIELD.qtyDelivered) return quantityDelivered(row);
+  if (header === FIELD.isReleased) return row[FIELD.isReleased] ? 1 : 0;
   if (header === FIELD.critical) return row[FIELD.critical] ? 1 : 0;
   if (header === FIELD.delivered) return row[FIELD.delivered] ? 1 : 0;
   if ([FIELD.quantity, FIELD.unitPricePo, FIELD.dateSubmitted, FIELD.submittalReturnExpected, FIELD.submittalReturnActual, FIELD.submittalReviewExpected, FIELD.submittalReviewActual, FIELD.scheduledRelease, FIELD.released, FIELD.delivery, FIELD.required, FIELD.lead, FIELD.remaining].includes(header)) {
@@ -2650,7 +2656,7 @@ function dateConflict(row, header) {
 }
 
 function logHeaders() {
-  return [FIELD.drawing, FIELD.tag, FIELD.pipeCategory, FIELD.category, FIELD.type, FIELD.endConnection, FIELD.item, FIELD.quantity, FIELD.units, FIELD.unitPricePo, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.submittal, FIELD.dateSubmitted, FIELD.submittalFiles, FIELD.submittalReviewExpected, FIELD.submittalReturnExpected, FIELD.submittalReturnActual, FIELD.submittalReviewActual, FIELD.status, FIELD.scheduledRelease, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
+  return [FIELD.drawing, FIELD.tag, FIELD.pipeCategory, FIELD.category, FIELD.type, FIELD.endConnection, FIELD.item, FIELD.quantity, FIELD.units, FIELD.unitPricePo, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.submittal, FIELD.dateSubmitted, FIELD.submittalFiles, FIELD.submittalReviewExpected, FIELD.submittalReturnExpected, FIELD.submittalReturnActual, FIELD.submittalReviewActual, FIELD.status, FIELD.scheduledRelease, FIELD.isReleased, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
 }
 
 function orderedLogHeaders() {
@@ -2732,6 +2738,7 @@ function getLogRows() {
     const text = filterText(value);
     const selected = filterSelections(value);
     if (header === FIELD.required) return matchesRequiredDateRange(row, text);
+    if (header === FIELD.isReleased) return text === "true" ? Boolean(row[FIELD.isReleased]) : !Boolean(row[FIELD.isReleased]);
     if (header === FIELD.critical) return text === "true" ? Boolean(row[FIELD.critical]) : !Boolean(row[FIELD.critical]);
     const display = clean(displayValue(row, header));
     const textMatches = !text || normalizeKey(display).includes(normalizeKey(text));
@@ -3068,6 +3075,15 @@ function renderLogHead() {
         </select>
       `;
     }
+    if (header === FIELD.isReleased) {
+      filterControl = `
+        <select class="column-filter-input" data-filter-column="${escapeHtml(header)}">
+          <option value="" ${filterText(state.logColumnFilters[header]) ? "" : "selected"}>All items</option>
+          <option value="true" ${filterText(state.logColumnFilters[header]) === "true" ? "selected" : ""}>Released only</option>
+          <option value="false" ${filterText(state.logColumnFilters[header]) === "false" ? "selected" : ""}>Not released</option>
+        </select>
+      `;
+    }
     return `
       <th class="resizable-header" data-header-column="${escapeHtml(header)}" style="${columnStyle(header)}">
         <div class="th-control">
@@ -3214,8 +3230,8 @@ function clearBulkSelection() {
 function bulkNormalizedValue(header, value) {
   const text = clean(value);
   if (header === FIELD.provider) return canonicalSupplierName(text) || text;
-  if ([FIELD.critical, FIELD.delivered].includes(header)) {
-    return ["YES", "TRUE", "Y", "1", "CHECKED", "CRITICAL", "DELIVERED"].includes(normalizeKey(text));
+  if ([FIELD.isReleased, FIELD.critical, FIELD.delivered].includes(header)) {
+    return ["YES", "TRUE", "Y", "1", "CHECKED", "RELEASED", "CRITICAL", "DELIVERED"].includes(normalizeKey(text));
   }
   return normalizeEditedValue(header, value);
 }
@@ -3810,7 +3826,7 @@ function renderLogBody() {
         if (header === FIELD.provider) {
           return renderProviderCell(row, header);
         }
-        if ([FIELD.critical, FIELD.delivered].includes(header)) {
+        if ([FIELD.isReleased, FIELD.critical, FIELD.delivered].includes(header)) {
           return `
             <td class="checkbox-cell" data-cell-column="${escapeHtml(header)}" style="${columnStyle(header)}">
               <input type="checkbox" data-checkbox-row="${escapeHtml(key)}" data-checkbox-column="${escapeHtml(header)}" data-log-field-row="${escapeHtml(key)}" data-log-field-column="${escapeHtml(header)}" ${row[header] ? "checked" : ""} aria-label="${escapeHtml(header)}" ${disabled} />
@@ -3908,7 +3924,7 @@ function bindRemoveButtons() {
 }
 
 function allTableHeaders() {
-  return [FIELD.drawing, FIELD.tag, FIELD.pipeCategory, FIELD.category, FIELD.type, FIELD.endConnection, FIELD.item, FIELD.quantity, FIELD.units, FIELD.unitPricePo, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.submittal, FIELD.dateSubmitted, FIELD.submittalFiles, FIELD.submittalReviewExpected, FIELD.submittalReturnExpected, FIELD.submittalReturnActual, FIELD.submittalReviewActual, FIELD.status, FIELD.scheduledRelease, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
+  return [FIELD.drawing, FIELD.tag, FIELD.pipeCategory, FIELD.category, FIELD.type, FIELD.endConnection, FIELD.item, FIELD.quantity, FIELD.units, FIELD.unitPricePo, FIELD.qtyDelivered, FIELD.spec, FIELD.provider, FIELD.area, FIELD.room, FIELD.system, FIELD.submittal, FIELD.dateSubmitted, FIELD.submittalFiles, FIELD.submittalReviewExpected, FIELD.submittalReturnExpected, FIELD.submittalReturnActual, FIELD.submittalReviewActual, FIELD.status, FIELD.scheduledRelease, FIELD.isReleased, FIELD.released, FIELD.lead, FIELD.delivery, FIELD.required, FIELD.critical, FIELD.delivered, FIELD.deliveries, FIELD.stored, FIELD.remaining, FIELD.notes];
 }
 
 function saveColumnPrefs() {
