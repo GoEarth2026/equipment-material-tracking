@@ -63,6 +63,7 @@ const state = {
     suppliers: [],
     statuses: [],
   },
+  supplierAliases: {},
   developmentNotes: [],
   userInitials: "",
   selectedImportFile: null,
@@ -470,6 +471,10 @@ function mergeSharedState(currentState, existingState = {}) {
     projects: mergeProjectsPreservingExisting(currentState.projects, existingState.projects, mergedRowsByProject),
     rowsByProject: mergedRowsByProject,
     deletedRowsByProject,
+    supplierAliases: {
+      ...(existingState.supplierAliases || {}),
+      ...(currentState.supplierAliases || {}),
+    },
     activityLog: [...new Map([
       ...(currentState.activityLog || []),
       ...(existingState.activityLog || []),
@@ -501,10 +506,20 @@ function normalizeSharedStateForSave(sharedState = {}) {
     Array.isArray(cleaned.projects) ? cleaned.projects : [],
     cleaned.rowsByProject || {},
   );
+  const aliases = cleaned.supplierAliases || {};
+  Object.values(cleaned.rowsByProject || {}).forEach((rows) => {
+    (rows || []).forEach((row) => {
+      const renamed = supplierAliasFor(row?.[FIELD.provider], aliases);
+      if (renamed) row[FIELD.provider] = renamed;
+    });
+  });
+  cleaned.supplierAliases = aliases;
   const protectedSuppliers = supplierSetFromSharedState(cleaned);
+  const listedSuppliers = (cleaned.adminLists?.suppliers || [])
+    .map((supplier) => supplierAliasFor(supplier, aliases) || supplier);
   cleaned.adminLists = {
     ...(cleaned.adminLists || {}),
-    suppliers: cleanSupplierList(cleaned.adminLists?.suppliers || [], protectedSuppliers),
+    suppliers: cleanSupplierList([...listedSuppliers, ...protectedSuppliers], protectedSuppliers),
     statuses: uniqueSorted(cleaned.adminLists?.statuses || []),
   };
   return cleaned;
@@ -553,11 +568,11 @@ function valuesMatch(first, second) {
   return JSON.stringify(first ?? null) === JSON.stringify(second ?? null);
 }
 
-function recordActivity(row, field, previousValue, nextValue, action = "updated") {
+function recordActivity(row, field, previousValue, nextValue, action = "updated", projectId = state.activeProjectId) {
   if (valuesMatch(previousValue, nextValue)) return;
   state.activityLog.unshift({
     id: `activity-${Date.now()}-${Math.floor(Math.random() * 1000000)}`,
-    projectId: state.activeProjectId,
+    projectId,
     rowKey: rowKey(row),
     field,
     action,
@@ -577,6 +592,13 @@ function formattedSavedTime(date = new Date()) {
 function requireSharedEditing() {
   if (canEditSharedData()) return true;
   alert(sharedEditingDisabledMessage());
+  return false;
+}
+
+function requireAdminEditing() {
+  if (!requireSharedEditing()) return false;
+  if (state.currentRole === "admin") return true;
+  alert("Only an Admin user can rename suppliers.");
   return false;
 }
 
@@ -622,7 +644,7 @@ function updateSharedEditingControls() {
   });
 
   document.querySelectorAll(
-    "[data-edit-column], [data-provider-row], [data-status-row], [data-checkbox-row], [data-bulk-row], [data-bulk-select-visible], #bulkColumnList input, [data-attach-submittal-row], [data-remove-submittal-file-row], [data-add-delivery-row], [data-edit-delivery-row], [data-remove-delivery-row], [data-add-note-row], [data-edit-note-row], [data-insert-row], [data-remove-row], [data-remove-list], [data-rename-status], [data-archive-project], [data-restore-project]",
+    "[data-edit-column], [data-provider-row], [data-status-row], [data-checkbox-row], [data-bulk-row], [data-bulk-select-visible], #bulkColumnList input, [data-attach-submittal-row], [data-remove-submittal-file-row], [data-add-delivery-row], [data-edit-delivery-row], [data-remove-delivery-row], [data-add-note-row], [data-edit-note-row], [data-insert-row], [data-remove-row], [data-remove-list], [data-rename-status], [data-rename-supplier], [data-archive-project], [data-restore-project]",
   ).forEach((control) => {
     if (control.matches("[data-edit-column]")) {
       control.contentEditable = disabled ? "false" : "true";
@@ -660,6 +682,7 @@ function collectSharedState() {
     rowsByProject: state.rowsByProject,
     deletedRowsByProject: state.deletedRowsByProject,
     adminLists: state.adminLists,
+    supplierAliases: state.supplierAliases,
     developmentNotes: state.developmentNotes,
     activityLog: state.activityLog,
     updatedAt: new Date().toISOString(),
@@ -674,6 +697,7 @@ function restorePendingSharedSave() {
     rowsByProject: state.rowsByProject,
     deletedRowsByProject: state.deletedRowsByProject,
     adminLists: state.adminLists,
+    supplierAliases: state.supplierAliases,
     developmentNotes: state.developmentNotes,
     activityLog: state.activityLog,
   };
@@ -682,6 +706,7 @@ function restorePendingSharedSave() {
   state.rowsByProject = merged.rowsByProject || state.rowsByProject;
   state.deletedRowsByProject = merged.deletedRowsByProject || state.deletedRowsByProject;
   state.adminLists = merged.adminLists || state.adminLists;
+  state.supplierAliases = merged.supplierAliases || state.supplierAliases;
   state.developmentNotes = merged.developmentNotes || state.developmentNotes;
   state.activityLog = merged.activityLog || state.activityLog;
   state.savePending = true;
@@ -801,6 +826,7 @@ async function loadSharedState() {
         state.rowsByProject[projectId] = (state.rowsByProject[projectId] || []).filter((row) => !deletedKeys.has(rowKey(row)));
       });
       state.adminLists = shared.adminLists || state.adminLists;
+      state.supplierAliases = shared.supplierAliases || {};
       state.developmentNotes = Array.isArray(shared.developmentNotes) ? shared.developmentNotes : [];
       state.activityLog = Array.isArray(shared.activityLog) ? shared.activityLog : [];
       state.cloudUpdatedAt = data.updated_at || null;
@@ -849,6 +875,7 @@ async function maybeMigrateLocalStorageToSupabase() {
     state.rowsByProject = localState.rowsByProject;
     state.deletedRowsByProject = localState.deletedRowsByProject || {};
     state.adminLists = localState.adminLists;
+    state.supplierAliases = localState.supplierAliases || {};
     state.developmentNotes = localState.developmentNotes || [];
     state.adminListsLoadedFromCloud = true;
     state.cloudReady = true;
@@ -1028,6 +1055,7 @@ function collectLocalStorageSharedState() {
     rowsByProject,
     deletedRowsByProject,
     adminLists,
+    supplierAliases: {},
     developmentNotes: safeJsonParse(localStorage.getItem(DEVELOPMENT_NOTES_PREF_KEY), []),
     updatedAt: new Date().toISOString(),
     migratedFromLocalStorage: true,
@@ -2234,6 +2262,10 @@ function supplierCompactKey(value) {
   return supplierMatchKey(value).replace(/[^A-Z0-9]+/g, "");
 }
 
+function supplierAliasFor(value, aliases = state.supplierAliases) {
+  return aliases?.[supplierMatchKey(value)] || aliases?.[`COMPACT:${supplierCompactKey(value)}`] || "";
+}
+
 function canonicalSupplierName(value) {
   const text = clean(value);
   if (!text) return null;
@@ -2333,6 +2365,72 @@ function renameStatus(oldValue) {
   renderLog();
   renderDashboard();
   renderProcurement();
+  populateGlobalFilters();
+}
+
+function renameSupplier(oldValue) {
+  if (!requireAdminEditing()) return;
+  const oldSupplier = clean(oldValue);
+  if (!oldSupplier) return;
+  const newSupplier = clean(prompt("Rename supplier:", oldSupplier));
+  if (!newSupplier || newSupplier === oldSupplier) return;
+
+  state.rowsByProject[state.activeProjectId] = state.rows;
+  state.projects.forEach((project) => {
+    if (!state.rowsByProject[project.id]) state.rowsByProject[project.id] = loadRowsForProject(project);
+  });
+
+  const oldMatchKey = supplierMatchKey(oldSupplier);
+  const oldCompactKey = supplierCompactKey(oldSupplier);
+  const matchingRows = [];
+  Object.entries(state.rowsByProject).forEach(([projectId, rows]) => {
+    (rows || []).forEach((row) => {
+      const supplier = row[FIELD.provider];
+      if (supplierMatchKey(supplier) === oldMatchKey || supplierCompactKey(supplier) === oldCompactKey) {
+        matchingRows.push({ projectId, row });
+      }
+    });
+  });
+
+  if (!confirm(`Rename supplier "${oldSupplier}" to "${newSupplier}" in ${matchingRows.length} material item(s) across all projects?`)) return;
+
+  const updatedAt = new Date().toISOString();
+  state.supplierAliases = Object.fromEntries(
+    Object.entries(state.supplierAliases || {})
+      .map(([key, value]) => [key, supplierMatchKey(value) === oldMatchKey ? newSupplier : value]),
+  );
+  state.supplierAliases[oldMatchKey] = newSupplier;
+  state.supplierAliases[`COMPACT:${oldCompactKey}`] = newSupplier;
+
+  const savedEdits = safeJsonParse(localStorage.getItem(EDIT_PREF_KEY), {});
+  matchingRows.forEach(({ projectId, row }) => {
+    const previousValue = row[FIELD.provider];
+    row[FIELD.provider] = newSupplier;
+    row._updatedAt = updatedAt;
+    row._updatedBy = actorLabel();
+    row._fieldUpdatedAt = { ...(row._fieldUpdatedAt || {}), [FIELD.provider]: updatedAt };
+    savedEdits[rowKey(row)] = { ...(savedEdits[rowKey(row)] || {}), [FIELD.provider]: newSupplier };
+    recordActivity(row, FIELD.provider, previousValue, newSupplier, "supplier renamed", projectId);
+  });
+
+  state.adminLists.suppliers = cleanSupplierList(
+    [...state.adminLists.suppliers.filter((supplier) => (
+      supplierMatchKey(supplier) !== oldMatchKey && supplierCompactKey(supplier) !== oldCompactKey
+    )), newSupplier],
+    supplierSetFromSharedState({ rowsByProject: state.rowsByProject }),
+  );
+  state.rows = state.rowsByProject[state.activeProjectId] || state.rows;
+  state.projects.forEach((project) => {
+    localStorage.setItem(projectRowsKey(project.id), JSON.stringify(state.rowsByProject[project.id] || []));
+  });
+  localStorage.setItem(EDIT_PREF_KEY, JSON.stringify(savedEdits));
+  saveAdminLists();
+  state.filtered = state.rows.filter(matchesFilters);
+  renderAdmin();
+  renderLog();
+  renderDashboard();
+  renderProcurement();
+  renderProviderReport();
   populateGlobalFilters();
 }
 
@@ -4442,10 +4540,12 @@ function renderDevelopmentNotes() {
 
 function renderAdminList(target, listName, values) {
   const disabled = canEditSharedData() ? "" : "disabled";
+  const adminDisabled = canEditSharedData() && state.currentRole === "admin" ? "" : "disabled";
   target.innerHTML = values.map((value) => `
     <div class="admin-row">
       <span>${escapeHtml(value)}</span>
       <div class="admin-row-actions">
+        ${listName === "suppliers" ? `<button class="text-button neutral" type="button" data-rename-supplier="${escapeHtml(value)}" ${adminDisabled}>Rename</button>` : ""}
         ${listName === "statuses" ? `<button class="text-button neutral" type="button" data-rename-status="${escapeHtml(value)}" ${disabled}>Rename</button>` : ""}
         <button class="text-button" type="button" data-remove-list="${listName}" data-remove-value="${escapeHtml(value)}" ${disabled}>Remove</button>
       </div>
@@ -4598,6 +4698,11 @@ function renderAdmin() {
   document.querySelectorAll("[data-rename-status]").forEach((button) => {
     button.addEventListener("click", () => {
       renameStatus(button.dataset.renameStatus);
+    });
+  });
+  document.querySelectorAll("[data-rename-supplier]").forEach((button) => {
+    button.addEventListener("click", () => {
+      renameSupplier(button.dataset.renameSupplier);
     });
   });
   updateSharedEditingControls();
