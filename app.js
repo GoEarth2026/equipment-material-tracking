@@ -204,6 +204,7 @@ const els = {
   tableScrollTop: document.querySelector("#tableScrollTop"),
   tableScrollTopInner: document.querySelector("#tableScrollTopInner"),
   procurementBoard: document.querySelector("#procurementBoard"),
+  reportType: document.querySelector("#reportTypeSelect"),
   reportProject: document.querySelector("#reportProjectSelect"),
   reportProvider: document.querySelector("#reportProviderSelect"),
   providerReportSummary: document.querySelector("#providerReportSummary"),
@@ -4539,6 +4540,147 @@ function providerReportTotals(lines) {
   });
 }
 
+function selectedReportItems() {
+  const selectedProvider = clean(els.reportProvider.value || "all");
+  return selectedReportProjects().flatMap((project) => loadRowsForProject(project)
+    .map((row) => ({ project, row }))
+    .filter(({ row }) => selectedProvider === "all" || (clean(row[FIELD.provider]) || "No provider") === selectedProvider));
+}
+
+function reportItemLabel(row) {
+  return clean(row[FIELD.item]) || clean(row[FIELD.tag]) || "Material item";
+}
+
+function reportNumeric(value) {
+  return hasMeaningfulValue(value) ? numeric(value) : null;
+}
+
+function deliveryReportStatus(row) {
+  const quantity = reportNumeric(row[FIELD.quantity]) || 0;
+  const deliveredQuantity = quantityDelivered(row);
+  if (row[FIELD.delivered] || (quantity > 0 && deliveredQuantity >= quantity)) return "Delivered";
+  if (deliveredQuantity > 0) return "Partially Delivered";
+  const expected = reportNumeric(row[FIELD.delivery]);
+  if (expected !== null && expected < todayExcelSerial()) return "Delivery Overdue";
+  if (row[FIELD.isReleased] || clean(row[FIELD.released])) return "Released / Awaiting Delivery";
+  return "Not Released";
+}
+
+function requiredOnsiteStatus(row) {
+  const required = reportNumeric(row[FIELD.required]);
+  if (required === null) return "Date Not Set";
+  const days = required - todayExcelSerial();
+  if (row[FIELD.delivered]) return "Delivered";
+  if (days < 0) return "Overdue";
+  if (days <= 30) return "Due Within 30 Days";
+  if (days <= 180) return "Due Within 6 Months";
+  return "Due Later";
+}
+
+function genericReportDefinition() {
+  const reportType = els.reportType.value;
+  const items = selectedReportItems();
+  const projectLabel = selectedOptionLabel(els.reportProject);
+  const providerLabel = selectedOptionLabel(els.reportProvider);
+  const suffix = `${projectLabel} - ${providerLabel}`;
+
+  if (reportType === "delivery-status") {
+    const rows = items.map(({ project, row }) => {
+      const status = deliveryReportStatus(row);
+      const quantity = reportNumeric(row[FIELD.quantity]) ?? clean(row[FIELD.quantity]);
+      const delivered = quantityDelivered(row);
+      const remaining = reportNumeric(quantity) === null ? "" : Math.max(Number(quantity) - delivered, 0);
+      return {
+        status,
+        cells: [project.name, clean(row[FIELD.provider]) || "No provider", clean(row[FIELD.category]), clean(row[FIELD.tag]), reportItemLabel(row), quantity, clean(row[FIELD.units]), delivered, remaining, excelDate(row[FIELD.released]), excelDate(row[FIELD.delivery]), excelDate(row[FIELD.required]), status],
+      };
+    });
+    return {
+      title: `Delivery Status Report - ${suffix}`,
+      headers: ["Project", "Provider", "Category", "Tag #", "Item Description", "Qty", "Units", "Qty Delivered", "Qty Remaining", "Date Released", "Expected Delivery", "Required Onsite", "Delivery Status"],
+      rows,
+      summaries: [
+        ["Total Items", rows.length],
+        ["Delivered", rows.filter((line) => line.status === "Delivered").length],
+        ["Partially Delivered", rows.filter((line) => line.status === "Partially Delivered").length],
+        ["Delivery Overdue", rows.filter((line) => line.status === "Delivery Overdue").length],
+        ["Not Released", rows.filter((line) => line.status === "Not Released").length],
+      ],
+    };
+  }
+
+  if (reportType === "required-onsite") {
+    const rows = items
+      .filter(({ row }) => reportNumeric(row[FIELD.required]) !== null && !row[FIELD.delivered])
+      .sort((a, b) => reportNumeric(a.row[FIELD.required]) - reportNumeric(b.row[FIELD.required]))
+      .map(({ project, row }) => {
+        const status = requiredOnsiteStatus(row);
+        const days = reportNumeric(row[FIELD.required]) - todayExcelSerial();
+        return {
+          status,
+          className: status === "Overdue" ? "report-discrepancy" : "",
+          cells: [project.name, clean(row[FIELD.provider]) || "No provider", clean(row[FIELD.category]), clean(row[FIELD.tag]), reportItemLabel(row), excelDate(row[FIELD.required]), days, excelDate(row[FIELD.delivery]), deliveryReportStatus(row), status],
+        };
+      });
+    return {
+      title: `Upcoming & Overdue Requirements - ${suffix}`,
+      headers: ["Project", "Provider", "Category", "Tag #", "Item Description", "Required Onsite", "Days Until Required", "Expected Delivery", "Delivery Status", "Timing"],
+      rows,
+      summaries: [
+        ["Open Requirements", rows.length],
+        ["Overdue", rows.filter((line) => line.status === "Overdue").length],
+        ["Due Within 30 Days", rows.filter((line) => line.status === "Due Within 30 Days").length],
+        ["Due Within 6 Months", rows.filter((line) => line.status === "Due Within 6 Months").length],
+        ["Due Later", rows.filter((line) => line.status === "Due Later").length],
+      ],
+    };
+  }
+
+  if (reportType === "critical-items") {
+    const rows = items.filter(({ row }) => Boolean(row[FIELD.critical])).map(({ project, row }) => ({
+      status: requiredOnsiteStatus(row),
+      cells: [project.name, clean(row[FIELD.provider]) || "No provider", clean(row[FIELD.category]), clean(row[FIELD.tag]), reportItemLabel(row), clean(row[FIELD.status]), row[FIELD.isReleased] ? "Yes" : "No", excelDate(row[FIELD.delivery]), excelDate(row[FIELD.required]), deliveryReportStatus(row), notesForExport(row[FIELD.notes])],
+    }));
+    return {
+      title: `Critical Items Report - ${suffix}`,
+      headers: ["Project", "Provider", "Category", "Tag #", "Item Description", "Submittal Status", "Released", "Expected Delivery", "Required Onsite", "Delivery Status", "Notes"],
+      rows,
+      summaries: [
+        ["Critical Items", rows.length],
+        ["Delivered", rows.filter((line) => line.cells[9] === "Delivered").length],
+        ["Not Released", rows.filter((line) => line.cells[9] === "Not Released").length],
+        ["Overdue Requirements", rows.filter((line) => line.status === "Overdue").length],
+        ["Due Within 30 Days", rows.filter((line) => line.status === "Due Within 30 Days").length],
+      ],
+    };
+  }
+
+  const rows = items
+    .filter(({ row }) => [FIELD.submittal, FIELD.status, FIELD.dateSubmitted, FIELD.submittalReturnExpected, FIELD.submittalReturnActual].some((field) => clean(row[field])))
+    .map(({ project, row }) => {
+      const expected = reportNumeric(row[FIELD.submittalReturnExpected]);
+      const actual = reportNumeric(row[FIELD.submittalReturnActual]);
+      const overdue = expected !== null && expected < todayExcelSerial() && actual === null;
+      return {
+        status: overdue ? "Overdue" : clean(row[FIELD.status]) || "No Status",
+        className: overdue ? "report-discrepancy" : "",
+        cells: [project.name, clean(row[FIELD.provider]) || "No provider", clean(row[FIELD.category]), clean(row[FIELD.tag]), reportItemLabel(row), clean(row[FIELD.submittal]), clean(row[FIELD.status]), excelDate(row[FIELD.dateSubmitted]), row[FIELD.submittalReviewExpected] ?? "", excelDate(row[FIELD.submittalReturnExpected]), excelDate(row[FIELD.submittalReturnActual]), row[FIELD.submittalReviewActual] ?? "", overdue ? "Overdue" : ""],
+      };
+    });
+  return {
+    title: `Submittal Status Report - ${suffix}`,
+    headers: ["Project", "Provider", "Category", "Tag #", "Item Description", "Submittal #", "Status", "Date Submitted", "Expected Review Days", "Expected Return", "Actual Return", "Actual Review Days", "Alert"],
+    rows,
+    summaries: [
+      ["Submittal Items", rows.length],
+      ["Overdue Returns", rows.filter((line) => line.status === "Overdue").length],
+      ["Returned", rows.filter((line) => clean(line.cells[10])).length],
+      ["Awaiting Return", rows.filter((line) => clean(line.cells[7]) && !clean(line.cells[10])).length],
+      ["No Status", rows.filter((line) => !clean(line.cells[6])).length],
+    ],
+  };
+}
+
 function populateReportFilters() {
   const projects = reportProjects();
   const currentProjectValue = els.reportProject.value || state.activeProjectId;
@@ -4550,7 +4692,6 @@ function populateReportFilters() {
 
   const providers = uniqueSorted(selectedReportProjects()
     .flatMap((project) => loadRowsForProject(project))
-    .filter((row) => rowDeliveries(row).length)
     .map((row) => clean(row[FIELD.provider]) || "No provider"));
   const currentProviderValue = els.reportProvider.value || "all";
   els.reportProvider.innerHTML = [
@@ -4581,7 +4722,7 @@ function reportTableRows(lines) {
   `).join("");
 }
 
-function renderProviderReport() {
+function renderPoInvoiceReport() {
   if (!els.reportProject || !els.reportProvider) return;
   populateReportFilters();
   const lines = providerReportLines();
@@ -4599,6 +4740,34 @@ function renderProviderReport() {
     </tr>
   `;
   els.providerReportBody.innerHTML = reportTableRows(lines) || `<tr><td colspan="14" class="empty">No delivered items match this report.</td></tr>`;
+}
+
+function genericReportTableRows(definition) {
+  return definition.rows.map((line) => `
+    <tr class="${escapeHtml(line.className || "")}">
+      ${line.cells.map((cell) => `<td>${escapeHtml(cell ?? "")}</td>`).join("")}
+    </tr>
+  `).join("");
+}
+
+function renderGenericReport() {
+  const definition = genericReportDefinition();
+  els.providerReportSummary.innerHTML = definition.summaries.map(([label, value]) => `
+    <article><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></article>
+  `).join("");
+  els.providerReportHead.innerHTML = `<tr>${definition.headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr>`;
+  els.providerReportBody.innerHTML = genericReportTableRows(definition)
+    || `<tr><td colspan="${definition.headers.length}" class="empty">No items match this report.</td></tr>`;
+}
+
+function renderProviderReport() {
+  if (!els.reportProject || !els.reportProvider || !els.reportType) return;
+  populateReportFilters();
+  if (els.reportType.value === "po-invoice") {
+    renderPoInvoiceReport();
+  } else {
+    renderGenericReport();
+  }
 }
 
 function providerReportWorksheetRows(lines = providerReportLines()) {
@@ -4629,7 +4798,7 @@ function providerReportTitle() {
   return `PO vs Invoice Report - ${projectLabel} - ${providerLabel}`;
 }
 
-function exportProviderReport() {
+function exportPoInvoiceReport() {
   const lines = providerReportLines();
   const totals = providerReportTotals(lines);
   const worksheetRows = [
@@ -4642,7 +4811,20 @@ function exportProviderReport() {
   downloadTextFile(xml, `${safeFileName(providerReportTitle())}-${dateStamp}.xls`, "application/vnd.ms-excel;charset=utf-8");
 }
 
-function printProviderReport() {
+function exportGenericReport() {
+  const definition = genericReportDefinition();
+  const worksheetRows = [definition.headers, ...definition.rows.map((line) => line.cells)];
+  const xml = buildExcelXml(definition.title, worksheetRows);
+  const dateStamp = new Date().toISOString().slice(0, 10);
+  downloadTextFile(xml, `${safeFileName(definition.title)}-${dateStamp}.xls`, "application/vnd.ms-excel;charset=utf-8");
+}
+
+function exportProviderReport() {
+  if (els.reportType.value === "po-invoice") exportPoInvoiceReport();
+  else exportGenericReport();
+}
+
+function printPoInvoiceReport() {
   const lines = providerReportLines();
   const totals = providerReportTotals(lines);
   const printWindow = window.open("", "_blank");
@@ -4711,6 +4893,62 @@ function printProviderReport() {
   </body>
 </html>`);
   printWindow.document.close();
+}
+
+function printGenericReport() {
+  const definition = genericReportDefinition();
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) {
+    window.print();
+    return;
+  }
+  const generatedAt = new Date().toLocaleString();
+  printWindow.document.open();
+  printWindow.document.write(`<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>${escapeHtml(definition.title)}</title>
+    <style>
+      @page { size: landscape; margin: 0.35in; }
+      * { box-sizing: border-box; }
+      body { margin: 0; color: #15221d; font-family: Arial, sans-serif; font-size: 9px; }
+      header { margin-bottom: 12px; }
+      h1 { margin: 0 0 4px; font-size: 18px; }
+      .meta { color: #52635d; font-size: 10px; margin-bottom: 6px; }
+      .summary { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+      .summary span { border: 1px solid #c4cec9; border-radius: 4px; padding: 4px 6px; }
+      table { width: 100%; border-collapse: collapse; table-layout: auto; }
+      th, td { border: 1px solid #9eadab; padding: 4px 5px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+      th { background: #edf2ef; font-size: 8px; text-transform: uppercase; }
+      .report-discrepancy td { background: #fff0ed; }
+      tbody tr:nth-child(even) td { background: #f8faf8; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>${escapeHtml(definition.title)}</h1>
+      <div class="meta">Generated ${escapeHtml(generatedAt)}</div>
+      <div class="summary">${definition.summaries.map(([label, value]) => `<span>${escapeHtml(label)}: ${escapeHtml(value)}</span>`).join("")}</div>
+    </header>
+    <table>
+      <thead><tr>${definition.headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
+      <tbody>${genericReportTableRows(definition) || `<tr><td colspan="${definition.headers.length}">No items match this report.</td></tr>`}</tbody>
+    </table>
+    <script>
+      window.addEventListener("load", () => {
+        window.focus();
+        window.print();
+      });
+    <\/script>
+  </body>
+</html>`);
+  printWindow.document.close();
+}
+
+function printProviderReport() {
+  if (els.reportType.value === "po-invoice") printPoInvoiceReport();
+  else printGenericReport();
 }
 
 function renderDevelopmentNotes() {
@@ -5118,6 +5356,7 @@ async function init() {
   els.alertsClose.addEventListener("click", () => els.alertsDialog.close());
   els.itemDetailsClose.addEventListener("click", () => els.itemDetailsDialog.close());
 
+  els.reportType.addEventListener("change", renderProviderReport);
   els.reportProject.addEventListener("change", renderProviderReport);
   els.reportProvider.addEventListener("change", renderProviderReport);
   els.printProviderReport.addEventListener("click", printProviderReport);
