@@ -62,8 +62,10 @@ const state = {
   adminLists: {
     suppliers: [],
     statuses: [],
+    categories: [],
   },
   supplierAliases: {},
+  categoryAliases: {},
   developmentNotes: [],
   userInitials: "",
   selectedImportFile: null,
@@ -227,6 +229,10 @@ const els = {
   statusAdminInput: document.querySelector("#statusAdminInput"),
   statusAdminList: document.querySelector("#statusAdminList"),
   statusAdminCount: document.querySelector("#statusAdminCount"),
+  categoryForm: document.querySelector("#categoryForm"),
+  categoryInput: document.querySelector("#categoryInput"),
+  categoryList: document.querySelector("#categoryList"),
+  categoryCount: document.querySelector("#categoryCount"),
   userAccessPanel: document.querySelector("#userAccessPanel"),
   userAccessList: document.querySelector("#userAccessList"),
   userAccessCount: document.querySelector("#userAccessCount"),
@@ -471,9 +477,21 @@ function mergeSharedState(currentState, existingState = {}) {
     projects: mergeProjectsPreservingExisting(currentState.projects, existingState.projects, mergedRowsByProject),
     rowsByProject: mergedRowsByProject,
     deletedRowsByProject,
+    adminLists: {
+      ...(existingState.adminLists || {}),
+      ...(currentState.adminLists || {}),
+      categories: uniqueSorted([
+        ...(existingState.adminLists?.categories || []),
+        ...(currentState.adminLists?.categories || []),
+      ]),
+    },
     supplierAliases: {
       ...(existingState.supplierAliases || {}),
       ...(currentState.supplierAliases || {}),
+    },
+    categoryAliases: {
+      ...(existingState.categoryAliases || {}),
+      ...(currentState.categoryAliases || {}),
     },
     activityLog: [...new Map([
       ...(currentState.activityLog || []),
@@ -514,6 +532,14 @@ function normalizeSharedStateForSave(sharedState = {}) {
     });
   });
   cleaned.supplierAliases = aliases;
+  const categoryAliases = cleaned.categoryAliases || {};
+  Object.values(cleaned.rowsByProject || {}).forEach((rows) => {
+    (rows || []).forEach((row) => {
+      const renamed = categoryAliasFor(row?.[FIELD.category], categoryAliases);
+      if (renamed) row[FIELD.category] = renamed;
+    });
+  });
+  cleaned.categoryAliases = categoryAliases;
   const protectedSuppliers = supplierSetFromSharedState(cleaned);
   const listedSuppliers = (cleaned.adminLists?.suppliers || [])
     .map((supplier) => supplierAliasFor(supplier, aliases) || supplier);
@@ -521,6 +547,10 @@ function normalizeSharedStateForSave(sharedState = {}) {
     ...(cleaned.adminLists || {}),
     suppliers: cleanSupplierList([...listedSuppliers, ...protectedSuppliers], protectedSuppliers),
     statuses: uniqueSorted(cleaned.adminLists?.statuses || []),
+    categories: uniqueSorted((cleaned.adminLists?.categories?.length
+      ? cleaned.adminLists.categories
+      : keeneBaselineCategories(cleaned))
+      .map((category) => categoryAliasFor(category, categoryAliases) || category)),
   };
   return cleaned;
 }
@@ -595,10 +625,10 @@ function requireSharedEditing() {
   return false;
 }
 
-function requireAdminEditing() {
+function requireAdminEditing(action = "make this change") {
   if (!requireSharedEditing()) return false;
   if (state.currentRole === "admin") return true;
-  alert("Only an Admin user can rename suppliers.");
+  alert(`Only an Admin user can ${action}.`);
   return false;
 }
 
@@ -616,6 +646,7 @@ function updateSharedEditingControls() {
     els.projectInput,
     els.supplierInput,
     els.statusAdminInput,
+    els.categoryInput,
     els.importFile,
     els.importProject,
     els.importMode,
@@ -637,19 +668,26 @@ function updateSharedEditingControls() {
     els.projectForm?.querySelector("button"),
     els.supplierForm?.querySelector("button"),
     els.statusAdminForm?.querySelector("button"),
+    els.categoryForm?.querySelector("button"),
     els.developmentNoteForm?.querySelector("button[type='submit']"),
     els.deliveryForm?.querySelector("button[type='submit']"),
   ].filter(Boolean).forEach((button) => {
     button.disabled = disabled;
   });
 
+  [els.categoryInput, els.categoryForm?.querySelector("button")].filter(Boolean).forEach((control) => {
+    control.disabled = disabled || state.currentRole !== "admin";
+  });
+
   document.querySelectorAll(
-    "[data-edit-column], [data-provider-row], [data-status-row], [data-checkbox-row], [data-bulk-row], [data-bulk-select-visible], #bulkColumnList input, [data-attach-submittal-row], [data-remove-submittal-file-row], [data-add-delivery-row], [data-edit-delivery-row], [data-remove-delivery-row], [data-add-note-row], [data-edit-note-row], [data-insert-row], [data-remove-row], [data-remove-list], [data-rename-status], [data-rename-supplier], [data-archive-project], [data-restore-project]",
+    "[data-edit-column], [data-provider-row], [data-category-row], [data-status-row], [data-checkbox-row], [data-bulk-row], [data-bulk-select-visible], #bulkColumnList input, [data-attach-submittal-row], [data-remove-submittal-file-row], [data-add-delivery-row], [data-edit-delivery-row], [data-remove-delivery-row], [data-add-note-row], [data-edit-note-row], [data-insert-row], [data-remove-row], [data-remove-list], [data-rename-status], [data-rename-supplier], [data-rename-category], [data-archive-project], [data-restore-project]",
   ).forEach((control) => {
     if (control.matches("[data-edit-column]")) {
       control.contentEditable = disabled ? "false" : "true";
       control.tabIndex = disabled ? -1 : 0;
       control.setAttribute("aria-readonly", disabled ? "true" : "false");
+    } else if (control.matches("[data-rename-supplier], [data-rename-category]")) {
+      control.disabled = disabled || state.currentRole !== "admin";
     } else {
       control.disabled = disabled;
     }
@@ -683,6 +721,7 @@ function collectSharedState() {
     deletedRowsByProject: state.deletedRowsByProject,
     adminLists: state.adminLists,
     supplierAliases: state.supplierAliases,
+    categoryAliases: state.categoryAliases,
     developmentNotes: state.developmentNotes,
     activityLog: state.activityLog,
     updatedAt: new Date().toISOString(),
@@ -698,6 +737,7 @@ function restorePendingSharedSave() {
     deletedRowsByProject: state.deletedRowsByProject,
     adminLists: state.adminLists,
     supplierAliases: state.supplierAliases,
+    categoryAliases: state.categoryAliases,
     developmentNotes: state.developmentNotes,
     activityLog: state.activityLog,
   };
@@ -707,6 +747,7 @@ function restorePendingSharedSave() {
   state.deletedRowsByProject = merged.deletedRowsByProject || state.deletedRowsByProject;
   state.adminLists = merged.adminLists || state.adminLists;
   state.supplierAliases = merged.supplierAliases || state.supplierAliases;
+  state.categoryAliases = merged.categoryAliases || state.categoryAliases;
   state.developmentNotes = merged.developmentNotes || state.developmentNotes;
   state.activityLog = merged.activityLog || state.activityLog;
   state.savePending = true;
@@ -827,6 +868,7 @@ async function loadSharedState() {
       });
       state.adminLists = shared.adminLists || state.adminLists;
       state.supplierAliases = shared.supplierAliases || {};
+      state.categoryAliases = shared.categoryAliases || {};
       state.developmentNotes = Array.isArray(shared.developmentNotes) ? shared.developmentNotes : [];
       state.activityLog = Array.isArray(shared.activityLog) ? shared.activityLog : [];
       state.cloudUpdatedAt = data.updated_at || null;
@@ -876,6 +918,7 @@ async function maybeMigrateLocalStorageToSupabase() {
     state.deletedRowsByProject = localState.deletedRowsByProject || {};
     state.adminLists = localState.adminLists;
     state.supplierAliases = localState.supplierAliases || {};
+    state.categoryAliases = localState.categoryAliases || {};
     state.developmentNotes = localState.developmentNotes || [];
     state.adminListsLoadedFromCloud = true;
     state.cloudReady = true;
@@ -1056,6 +1099,7 @@ function collectLocalStorageSharedState() {
     deletedRowsByProject,
     adminLists,
     supplierAliases: {},
+    categoryAliases: {},
     developmentNotes: safeJsonParse(localStorage.getItem(DEVELOPMENT_NOTES_PREF_KEY), []),
     updatedAt: new Date().toISOString(),
     migratedFromLocalStorage: true,
@@ -1979,6 +2023,9 @@ function importedValue(header, value) {
   if (header === FIELD.provider) {
     return canonicalSupplierName(text) || text;
   }
+  if (header === FIELD.category) {
+    return canonicalCategoryName(text) || text;
+  }
   if (header === FIELD.notes) {
     return serializeNotes([{ timestamp: formatNoteTimestamp(), initials: "Import", text }]);
   }
@@ -2266,6 +2313,47 @@ function supplierAliasFor(value, aliases = state.supplierAliases) {
   return aliases?.[supplierMatchKey(value)] || aliases?.[`COMPACT:${supplierCompactKey(value)}`] || "";
 }
 
+function categoryMatchKey(value) {
+  return normalizeKey(value).replace(/[^A-Z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function categoryCompactKey(value) {
+  return categoryMatchKey(value).replace(/[^A-Z0-9]+/g, "");
+}
+
+function categoryAliasFor(value, aliases = state.categoryAliases) {
+  return aliases?.[categoryMatchKey(value)] || aliases?.[`COMPACT:${categoryCompactKey(value)}`] || "";
+}
+
+function keeneBaselineCategories(sharedState = state) {
+  const projects = sharedState.projects || [];
+  const keeneProject = projects.find((project) => {
+    const identity = normalizeKey(`${project?.id || ""} ${project?.name || ""}`);
+    return identity.includes("KEENE") && identity.includes("MARTEL");
+  });
+  if (!keeneProject) return [];
+  return uniqueSorted((sharedState.rowsByProject?.[keeneProject.id] || []).map((row) => row?.[FIELD.category]));
+}
+
+function canonicalCategoryName(value) {
+  const text = clean(value);
+  if (!text) return null;
+  const alias = categoryAliasFor(text);
+  if (alias) return alias;
+  const categoryKey = categoryMatchKey(text);
+  const compactKey = categoryCompactKey(text);
+  const categories = uniqueSorted(state.adminLists.categories || []);
+  const exact = categories.find((category) => (
+    categoryMatchKey(category) === categoryKey || categoryCompactKey(category) === compactKey
+  ));
+  if (exact) return exact;
+  const prefixMatches = categories.filter((category) => (
+    categoryMatchKey(category).startsWith(categoryKey) || categoryCompactKey(category).startsWith(compactKey)
+  ));
+  if (prefixMatches.length === 1 && text.length >= 2) return prefixMatches[0];
+  return undefined;
+}
+
 function canonicalSupplierName(value) {
   const text = clean(value);
   if (!text) return null;
@@ -2287,6 +2375,7 @@ function normalizeAdminLists() {
   state.adminLists = {
     suppliers: cleanSupplierList(state.adminLists.suppliers || []),
     statuses: uniqueSorted(state.adminLists.statuses || []),
+    categories: uniqueSorted(state.adminLists.categories?.length ? state.adminLists.categories : keeneBaselineCategories()),
   };
   localStorage.setItem(ADMIN_PREF_KEY, JSON.stringify(state.adminLists));
 }
@@ -2295,6 +2384,7 @@ function seedAdminLists() {
   state.adminLists = {
     suppliers: cleanSupplierList(state.rows.map((row) => row[FIELD.provider])),
     statuses: uniqueSorted(state.rows.map((row) => row[FIELD.status])),
+    categories: keeneBaselineCategories(),
   };
 }
 
@@ -2308,6 +2398,7 @@ function loadAdminLists() {
     const saved = JSON.parse(localStorage.getItem(ADMIN_PREF_KEY) || "{}");
     state.adminLists.suppliers = cleanSupplierList([...(state.adminLists.suppliers || []), ...(saved.suppliers || [])]);
     state.adminLists.statuses = uniqueSorted([...(state.adminLists.statuses || []), ...(saved.statuses || [])]);
+    state.adminLists.categories = uniqueSorted([...(state.adminLists.categories || []), ...(saved.categories || [])]);
   } catch {
     localStorage.removeItem(ADMIN_PREF_KEY);
   }
@@ -2369,7 +2460,7 @@ function renameStatus(oldValue) {
 }
 
 function renameSupplier(oldValue) {
-  if (!requireAdminEditing()) return;
+  if (!requireAdminEditing("rename suppliers")) return;
   const oldSupplier = clean(oldValue);
   if (!oldSupplier) return;
   const newSupplier = clean(prompt("Rename supplier:", oldSupplier));
@@ -2431,6 +2522,66 @@ function renameSupplier(oldValue) {
   renderDashboard();
   renderProcurement();
   renderProviderReport();
+  populateGlobalFilters();
+}
+
+function renameCategory(oldValue) {
+  if (!requireAdminEditing("rename categories")) return;
+  const oldCategory = clean(oldValue);
+  if (!oldCategory) return;
+  const newCategory = clean(prompt("Rename category:", oldCategory));
+  if (!newCategory || newCategory === oldCategory) return;
+
+  state.rowsByProject[state.activeProjectId] = state.rows;
+  state.projects.forEach((project) => {
+    if (!state.rowsByProject[project.id]) state.rowsByProject[project.id] = loadRowsForProject(project);
+  });
+  const oldMatchKey = categoryMatchKey(oldCategory);
+  const oldCompactKey = categoryCompactKey(oldCategory);
+  const matchingRows = [];
+  Object.entries(state.rowsByProject).forEach(([projectId, rows]) => {
+    (rows || []).forEach((row) => {
+      if (categoryMatchKey(row[FIELD.category]) === oldMatchKey || categoryCompactKey(row[FIELD.category]) === oldCompactKey) {
+        matchingRows.push({ projectId, row });
+      }
+    });
+  });
+  if (!confirm(`Rename category "${oldCategory}" to "${newCategory}" in ${matchingRows.length} material item(s) across all projects?`)) return;
+
+  const updatedAt = new Date().toISOString();
+  state.categoryAliases = Object.fromEntries(
+    Object.entries(state.categoryAliases || {})
+      .map(([key, value]) => [key, categoryMatchKey(value) === oldMatchKey ? newCategory : value]),
+  );
+  state.categoryAliases[oldMatchKey] = newCategory;
+  state.categoryAliases[`COMPACT:${oldCompactKey}`] = newCategory;
+  const savedEdits = safeJsonParse(localStorage.getItem(EDIT_PREF_KEY), {});
+  matchingRows.forEach(({ projectId, row }) => {
+    const previousValue = row[FIELD.category];
+    row[FIELD.category] = newCategory;
+    row._updatedAt = updatedAt;
+    row._updatedBy = actorLabel();
+    row._fieldUpdatedAt = { ...(row._fieldUpdatedAt || {}), [FIELD.category]: updatedAt };
+    savedEdits[rowKey(row)] = { ...(savedEdits[rowKey(row)] || {}), [FIELD.category]: newCategory };
+    recordActivity(row, FIELD.category, previousValue, newCategory, "category renamed", projectId);
+  });
+  state.adminLists.categories = uniqueSorted([
+    ...state.adminLists.categories.filter((category) => (
+      categoryMatchKey(category) !== oldMatchKey && categoryCompactKey(category) !== oldCompactKey
+    )),
+    newCategory,
+  ]);
+  state.rows = state.rowsByProject[state.activeProjectId] || state.rows;
+  state.projects.forEach((project) => {
+    localStorage.setItem(projectRowsKey(project.id), JSON.stringify(state.rowsByProject[project.id] || []));
+  });
+  localStorage.setItem(EDIT_PREF_KEY, JSON.stringify(savedEdits));
+  saveAdminLists();
+  state.filtered = state.rows.filter(matchesFilters);
+  renderAdmin();
+  renderLog();
+  renderDashboard();
+  renderProcurement();
   populateGlobalFilters();
 }
 
@@ -3328,6 +3479,7 @@ function clearBulkSelection() {
 function bulkNormalizedValue(header, value) {
   const text = clean(value);
   if (header === FIELD.provider) return canonicalSupplierName(text) || text;
+  if (header === FIELD.category) return canonicalCategoryName(text);
   if ([FIELD.isReleased, FIELD.critical, FIELD.delivered].includes(header)) {
     return ["YES", "TRUE", "Y", "1", "CHECKED", "RELEASED", "CRITICAL", "DELIVERED"].includes(normalizeKey(text));
   }
@@ -3347,6 +3499,10 @@ function applyBulkEdit() {
     return;
   }
   const value = els.bulkEditValue.value;
+  if (headers.includes(FIELD.category) && canonicalCategoryName(value) === undefined) {
+    alert("Select a category from the standardized list. Ask an Admin to add a new category if needed.");
+    return;
+  }
   if (!confirm(`Apply this value to ${headers.length} column(s) across ${rows.length} selected row(s)?`)) return;
   rows.forEach((row) => {
     headers.forEach((header) => {
@@ -3429,6 +3585,7 @@ function bindLogFieldTabbing() {
     control.addEventListener("blur", () => clearActiveEditing());
     if (control.isContentEditable) return;
     if (control.matches("[data-provider-row]")) return;
+    if (control.matches("[data-category-row]")) return;
     control.addEventListener("keydown", (event) => {
       if (moveLogFieldWithArrow(event, control.dataset.logFieldRow, control.dataset.logFieldColumn)) return;
       if (event.key === "Tab") {
@@ -3619,6 +3776,46 @@ function bindProviderInputs() {
   });
 }
 
+function saveCategoryInput(input) {
+  if (!canEditSharedData()) return false;
+  const row = state.rows.find((candidate) => rowKey(candidate) === input.dataset.categoryRow);
+  if (!row) return false;
+  const canonical = canonicalCategoryName(input.value);
+  if (canonical === undefined) {
+    input.value = editableValue(row, FIELD.category);
+    alert("Please select a category from the standardized list. Ask an Admin to add a new category if needed.");
+    return false;
+  }
+  input.value = canonical || "";
+  saveCellEdit(row, FIELD.category, canonical);
+  state.filtered = state.rows.filter(matchesFilters);
+  populateGlobalFilters();
+  renderColumnMenu();
+  renderLog();
+  renderDashboard();
+  renderProcurement();
+  return true;
+}
+
+function bindCategoryInputs() {
+  els.logBody.querySelectorAll("[data-category-row]").forEach((input) => {
+    input.addEventListener("change", () => saveCategoryInput(input));
+    input.addEventListener("keydown", (event) => {
+      if (!canEditSharedData()) return;
+      if (event.key === "Enter") {
+        event.preventDefault();
+        input.blur();
+      }
+      if (event.key === "Tab") {
+        event.preventDefault();
+        const rowKeyValue = input.dataset.categoryRow;
+        if (saveCategoryInput(input)) focusAdjacentLogField(rowKeyValue, FIELD.category, event.shiftKey ? -1 : 1);
+      }
+    });
+    input.addEventListener("blur", () => saveCategoryInput(input));
+  });
+}
+
 function bindLogCheckboxes() {
   els.logBody.querySelectorAll("[data-checkbox-row]").forEach((checkbox) => {
     checkbox.addEventListener("change", () => {
@@ -3795,6 +3992,21 @@ function renderProviderCell(row, header = FIELD.provider) {
   `;
 }
 
+function renderCategoryCell(row, header = FIELD.category) {
+  const key = rowKey(row);
+  const listId = `category-options-${escapeHtml(key).replace(/[^a-z0-9_-]+/gi, "-")}`;
+  const disabled = canEditSharedData() ? "" : "disabled";
+  const options = uniqueSorted([clean(row[FIELD.category]), ...(state.adminLists.categories || [])]);
+  return `
+    <td data-cell-column="${escapeHtml(header)}" style="${columnStyle(header)}">
+      <input class="cell-input" list="${listId}" value="${escapeHtml(editableValue(row, header))}" data-category-row="${escapeHtml(key)}" data-log-field-row="${escapeHtml(key)}" data-log-field-column="${escapeHtml(header)}" autocomplete="off" ${disabled} />
+      <datalist id="${listId}">
+        ${options.map((category) => `<option value="${escapeHtml(category)}"></option>`).join("")}
+      </datalist>
+    </td>
+  `;
+}
+
 function renderNotesCell(row, header = FIELD.notes) {
   const notes = parseNotes(row[FIELD.notes]);
   const key = rowKey(row);
@@ -3924,6 +4136,9 @@ function renderLogBody() {
         if (header === FIELD.provider) {
           return renderProviderCell(row, header);
         }
+        if (header === FIELD.category) {
+          return renderCategoryCell(row, header);
+        }
         if ([FIELD.isReleased, FIELD.critical, FIELD.delivered].includes(header)) {
           return `
             <td class="checkbox-cell" data-cell-column="${escapeHtml(header)}" style="${columnStyle(header)}">
@@ -3950,6 +4165,7 @@ function renderLogBody() {
   bindEditableCells();
   bindLogFieldTabbing();
   bindProviderInputs();
+  bindCategoryInputs();
   bindStatusSelects();
   bindLogCheckboxes();
   bindDeliveryButtons();
@@ -4546,8 +4762,9 @@ function renderAdminList(target, listName, values) {
       <span>${escapeHtml(value)}</span>
       <div class="admin-row-actions">
         ${listName === "suppliers" ? `<button class="text-button neutral" type="button" data-rename-supplier="${escapeHtml(value)}" ${adminDisabled}>Rename</button>` : ""}
+        ${listName === "categories" ? `<button class="text-button neutral" type="button" data-rename-category="${escapeHtml(value)}" ${adminDisabled}>Rename</button>` : ""}
         ${listName === "statuses" ? `<button class="text-button neutral" type="button" data-rename-status="${escapeHtml(value)}" ${disabled}>Rename</button>` : ""}
-        <button class="text-button" type="button" data-remove-list="${listName}" data-remove-value="${escapeHtml(value)}" ${disabled}>Remove</button>
+        ${listName === "categories" ? "" : `<button class="text-button" type="button" data-remove-list="${listName}" data-remove-value="${escapeHtml(value)}" ${disabled}>Remove</button>`}
       </div>
     </div>
   `).join("") || `<p class="empty">No values yet.</p>`;
@@ -4684,8 +4901,10 @@ function renderAdmin() {
   els.userInitialsInput.value = state.userInitials;
   els.supplierCount.textContent = `${state.adminLists.suppliers.length} values`;
   els.statusAdminCount.textContent = `${state.adminLists.statuses.length} values`;
+  els.categoryCount.textContent = `${state.adminLists.categories.length} values`;
   renderAdminList(els.supplierList, "suppliers", state.adminLists.suppliers);
   renderAdminList(els.statusAdminList, "statuses", state.adminLists.statuses);
+  renderAdminList(els.categoryList, "categories", state.adminLists.categories);
   renderUserAccess();
   renderBackups();
 
@@ -4703,6 +4922,11 @@ function renderAdmin() {
   document.querySelectorAll("[data-rename-supplier]").forEach((button) => {
     button.addEventListener("click", () => {
       renameSupplier(button.dataset.renameSupplier);
+    });
+  });
+  document.querySelectorAll("[data-rename-category]").forEach((button) => {
+    button.addEventListener("click", () => {
+      renameCategory(button.dataset.renameCategory);
     });
   });
   updateSharedEditingControls();
@@ -4975,6 +5199,13 @@ async function init() {
     event.preventDefault();
     addAdminValue("statuses", els.statusAdminInput.value);
     els.statusAdminInput.value = "";
+  });
+
+  els.categoryForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (!requireAdminEditing("add categories")) return;
+    addAdminValue("categories", els.categoryInput.value);
+    els.categoryInput.value = "";
   });
 
   els.userInitialsInput.addEventListener("input", () => {

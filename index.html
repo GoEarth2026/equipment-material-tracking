@@ -276,6 +276,18 @@
               <div class="admin-list" id="statusAdminList"></div>
             </section>
 
+            <section class="panel admin-panel">
+              <div class="section-heading">
+                <h3>Categories</h3>
+                <span id="categoryCount"></span>
+              </div>
+              <form class="admin-form" id="categoryForm">
+                <input id="categoryInput" type="text" placeholder="Add category" />
+                <button class="ghost-button" type="submit">Add</button>
+              </form>
+              <div class="admin-list" id="categoryList"></div>
+            </section>
+
             <section class="panel admin-panel" id="userAccessPanel">
               <div class="section-heading">
                 <h3>User Access</h3>
@@ -362,6 +374,6 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="./supabase-config.js"></script>
-    <script src="./app.js?v=supplier-rename1"></script>
+    <script src="./app.js?v=category-standards1"></script>
   </body>
 </html>
