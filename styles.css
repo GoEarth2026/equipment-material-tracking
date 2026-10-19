@@ -1530,9 +1530,14 @@ tr:hover td {
 
 .report-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: end;
   gap: 10px;
   padding: 14px;
+}
+
+.report-controls label[hidden] {
+  display: none;
 }
 
 .report-controls label {

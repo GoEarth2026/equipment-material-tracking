@@ -133,6 +133,7 @@
               <input id="bulkEditValue" type="text" />
             </label>
             <div class="bulk-edit-actions">
+              <button class="ghost-button" id="bulkAddNoteButton" type="button">Add Note to Selected Rows</button>
               <button class="ghost-button" id="bulkApplyButton" type="button">Apply to Selected Rows</button>
               <button class="ghost-button" id="bulkClearButton" type="button">Clear Selection</button>
             </div>
@@ -165,6 +166,17 @@
                   <option value="required-onsite">Upcoming &amp; Overdue Requirements</option>
                   <option value="critical-items">Critical Items</option>
                   <option value="submittal-status">Submittal Status</option>
+                  <option value="material-summary">Material Quantity Summary</option>
+                </select>
+              </label>
+              <label id="reportGroupControl" hidden>
+                Group By
+                <select id="reportGroupSelect">
+                  <option value="TYPE">Type</option>
+                  <option value="CATEGORY">Category</option>
+                  <option value="ITEM DESCRIPTION">Item Description</option>
+                  <option value="PROVIDED BY:">Provider</option>
+                  <option value="END CONNECTION">End Connection</option>
                 </select>
               </label>
               <label>
@@ -365,6 +377,32 @@
       </form>
     </dialog>
 
+    <dialog class="delivery-dialog" id="bulkNoteDialog">
+      <form method="dialog" id="bulkNoteForm">
+        <div class="delivery-dialog-header">
+          <div>
+            <h3>Add Note to Selected Items</h3>
+            <p id="bulkNoteDialogCount" class="delivery-dialog-item"></p>
+          </div>
+          <button class="icon-row-button" id="bulkNoteDialogClose" type="button" aria-label="Close note form">×</button>
+        </div>
+        <div class="delivery-dialog-grid">
+          <label>
+            INITIALS
+            <input id="bulkNoteInitials" type="text" maxlength="6" required />
+          </label>
+          <label class="delivery-notes-field">
+            NOTE
+            <textarea id="bulkNoteText" rows="6" required></textarea>
+          </label>
+        </div>
+        <div class="delivery-dialog-actions">
+          <button class="ghost-button" id="bulkNoteCancel" type="button">Cancel</button>
+          <button class="ghost-button primary-action" type="submit">Add Note</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog class="item-details-dialog" id="itemDetailsDialog">
       <div class="delivery-dialog-header">
         <div><h3 id="itemDetailsTitle">Item Details</h3><p id="itemDetailsSubtitle" class="delivery-dialog-item"></p></div>
@@ -384,6 +422,6 @@
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="./supabase-config.js"></script>
-    <script src="./app.js?v=report-library1"></script>
+    <script src="./app.js?v=bulk-notes-summary1"></script>
   </body>
 </html>

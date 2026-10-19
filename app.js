@@ -182,6 +182,7 @@ const els = {
   bulkSelectionCount: document.querySelector("#bulkSelectionCount"),
   bulkColumnList: document.querySelector("#bulkColumnList"),
   bulkEditValue: document.querySelector("#bulkEditValue"),
+  bulkAddNote: document.querySelector("#bulkAddNoteButton"),
   bulkApply: document.querySelector("#bulkApplyButton"),
   bulkClear: document.querySelector("#bulkClearButton"),
   exportExcel: document.querySelector("#exportExcelButton"),
@@ -205,6 +206,8 @@ const els = {
   tableScrollTopInner: document.querySelector("#tableScrollTopInner"),
   procurementBoard: document.querySelector("#procurementBoard"),
   reportType: document.querySelector("#reportTypeSelect"),
+  reportGroupControl: document.querySelector("#reportGroupControl"),
+  reportGroup: document.querySelector("#reportGroupSelect"),
   reportProject: document.querySelector("#reportProjectSelect"),
   reportProvider: document.querySelector("#reportProviderSelect"),
   providerReportSummary: document.querySelector("#providerReportSummary"),
@@ -261,6 +264,13 @@ const els = {
   deliveryUnitPricePo: document.querySelector("#deliveryUnitPricePoInput"),
   deliveryUnitPriceInvoice: document.querySelector("#deliveryUnitPriceInvoiceInput"),
   deliveryNotes: document.querySelector("#deliveryNotesInput"),
+  bulkNoteDialog: document.querySelector("#bulkNoteDialog"),
+  bulkNoteForm: document.querySelector("#bulkNoteForm"),
+  bulkNoteDialogCount: document.querySelector("#bulkNoteDialogCount"),
+  bulkNoteInitials: document.querySelector("#bulkNoteInitials"),
+  bulkNoteText: document.querySelector("#bulkNoteText"),
+  bulkNoteCancel: document.querySelector("#bulkNoteCancel"),
+  bulkNoteClose: document.querySelector("#bulkNoteDialogClose"),
   itemDetailsDialog: document.querySelector("#itemDetailsDialog"),
   itemDetailsTitle: document.querySelector("#itemDetailsTitle"),
   itemDetailsSubtitle: document.querySelector("#itemDetailsSubtitle"),
@@ -661,6 +671,8 @@ function updateSharedEditingControls() {
     els.deliveryUnitPricePo,
     els.deliveryUnitPriceInvoice,
     els.deliveryNotes,
+    els.bulkNoteInitials,
+    els.bulkNoteText,
   ].filter(Boolean).forEach((control) => {
     control.disabled = disabled;
   });
@@ -672,6 +684,7 @@ function updateSharedEditingControls() {
     els.categoryForm?.querySelector("button"),
     els.developmentNoteForm?.querySelector("button[type='submit']"),
     els.deliveryForm?.querySelector("button[type='submit']"),
+    els.bulkNoteForm?.querySelector("button[type='submit']"),
   ].filter(Boolean).forEach((button) => {
     button.disabled = disabled;
   });
@@ -679,6 +692,7 @@ function updateSharedEditingControls() {
   [els.categoryInput, els.categoryForm?.querySelector("button")].filter(Boolean).forEach((control) => {
     control.disabled = disabled || state.currentRole !== "admin";
   });
+  if (els.bulkAddNote) els.bulkAddNote.disabled = disabled || state.selectedBulkRows.size === 0;
 
   document.querySelectorAll(
     "[data-edit-column], [data-provider-row], [data-category-row], [data-status-row], [data-checkbox-row], [data-bulk-row], [data-bulk-select-visible], #bulkColumnList input, [data-attach-submittal-row], [data-remove-submittal-file-row], [data-add-delivery-row], [data-edit-delivery-row], [data-remove-delivery-row], [data-add-note-row], [data-edit-note-row], [data-insert-row], [data-remove-row], [data-remove-list], [data-rename-status], [data-rename-supplier], [data-rename-category], [data-archive-project], [data-restore-project]",
@@ -3444,6 +3458,7 @@ function renderBulkEditPanel() {
   const selectedCount = state.selectedBulkRows.size;
   const headers = bulkEditableHeaders();
   els.bulkSelectionCount.textContent = `${selectedCount} row${selectedCount === 1 ? "" : "s"} selected`;
+  if (els.bulkAddNote) els.bulkAddNote.disabled = !canEditSharedData() || selectedCount === 0;
   els.bulkColumnList.innerHTML = headers.map((header) => `
     <label>
       <input type="checkbox" value="${escapeHtml(header)}" ${state.selectedBulkColumns.has(header) ? "checked" : ""} />
@@ -3459,6 +3474,49 @@ function renderBulkEditPanel() {
       }
     });
   });
+}
+
+function openBulkNoteDialog() {
+  if (!requireSharedEditing()) return;
+  const rows = selectedBulkRows();
+  if (!rows.length) {
+    alert("Select at least one row first.");
+    return;
+  }
+  els.bulkNoteDialogCount.textContent = `This note will be added to ${rows.length} selected item${rows.length === 1 ? "" : "s"}.`;
+  els.bulkNoteInitials.value = clean(state.userInitials).toUpperCase();
+  els.bulkNoteText.value = "";
+  els.bulkNoteDialog.showModal();
+  requestAnimationFrame(() => (els.bulkNoteInitials.value ? els.bulkNoteText : els.bulkNoteInitials).focus());
+}
+
+function closeBulkNoteDialog() {
+  els.bulkNoteDialog.close();
+}
+
+function saveBulkNote() {
+  if (!requireSharedEditing()) return;
+  const rows = selectedBulkRows();
+  const initials = clean(els.bulkNoteInitials.value).toUpperCase();
+  const text = clean(els.bulkNoteText.value);
+  if (!rows.length || !initials || !text) {
+    els.bulkNoteForm.reportValidity();
+    return;
+  }
+  state.userInitials = initials;
+  localStorage.setItem(INITIALS_PREF_KEY, initials);
+  if (els.userInitialsInput) els.userInitialsInput.value = initials;
+  const timestamp = formatNoteTimestamp();
+  rows.forEach((row) => {
+    const notes = parseNotes(row[FIELD.notes]);
+    notes.push({ timestamp, initials, text });
+    saveCellEdit(row, FIELD.notes, serializeNotes(notes));
+  });
+  state.filtered = state.rows.filter(matchesFilters);
+  closeBulkNoteDialog();
+  renderLog();
+  renderDashboard();
+  renderProcurement();
 }
 
 function toggleVisibleBulkRows(checked) {
@@ -4609,6 +4667,65 @@ function genericReportDefinition() {
     };
   }
 
+  if (reportType === "material-summary") {
+    const groupField = els.reportGroup.value || FIELD.type;
+    const groupLabels = {
+      [FIELD.type]: "Type",
+      [FIELD.category]: "Category",
+      [FIELD.item]: "Item Description",
+      [FIELD.provider]: "Provider",
+      [FIELD.endConnection]: "End Connection",
+    };
+    const grouped = new Map();
+    items.forEach(({ project, row }) => {
+      const groupValue = clean(row[groupField]) || "Unspecified";
+      const key = `${project.id}\u0000${normalizeKey(groupValue)}`;
+      if (!grouped.has(key)) {
+        grouped.set(key, {
+          project: project.name,
+          group: groupValue,
+          required: 0,
+          delivered: 0,
+          units: new Set(),
+          itemCount: 0,
+        });
+      }
+      const summary = grouped.get(key);
+      summary.required += reportNumeric(row[FIELD.quantity]) || 0;
+      summary.delivered += quantityDelivered(row);
+      summary.itemCount += 1;
+      if (clean(row[FIELD.units])) summary.units.add(clean(row[FIELD.units]));
+    });
+    const groups = [...grouped.values()].sort((a, b) => (
+      a.project.localeCompare(b.project) || a.group.localeCompare(b.group)
+    ));
+    const rows = groups.map((group) => {
+      const remaining = Math.max(group.required - group.delivered, 0);
+      return {
+        cells: [group.project, group.group, group.itemCount, group.required, group.delivered, remaining, group.units.size === 1 ? [...group.units][0] : (group.units.size ? "Mixed" : "")],
+      };
+    });
+    const totals = groups.reduce((result, group) => {
+      result.required += group.required;
+      result.delivered += group.delivered;
+      result.remaining += Math.max(group.required - group.delivered, 0);
+      result.items += group.itemCount;
+      return result;
+    }, { required: 0, delivered: 0, remaining: 0, items: 0 });
+    return {
+      title: `Material Quantity Summary by ${groupLabels[groupField] || groupField} - ${suffix}`,
+      headers: ["Project", groupLabels[groupField] || groupField, "Line Items", "Total Required", "Total Delivered", "Total Remaining", "Units"],
+      rows,
+      summaries: [
+        ["Summary Groups", rows.length],
+        ["Line Items", totals.items],
+        ["Total Required", totals.required],
+        ["Total Delivered", totals.delivered],
+        ["Total Remaining", totals.remaining],
+      ],
+    };
+  }
+
   if (reportType === "required-onsite") {
     const rows = items
       .filter(({ row }) => reportNumeric(row[FIELD.required]) !== null && !row[FIELD.delivered])
@@ -4762,6 +4879,7 @@ function renderGenericReport() {
 
 function renderProviderReport() {
   if (!els.reportProject || !els.reportProvider || !els.reportType) return;
+  els.reportGroupControl.hidden = els.reportType.value !== "material-summary";
   populateReportFilters();
   if (els.reportType.value === "po-invoice") {
     renderPoInvoiceReport();
@@ -5336,6 +5454,8 @@ async function init() {
 
   els.bulkApply.addEventListener("click", applyBulkEdit);
 
+  els.bulkAddNote.addEventListener("click", openBulkNoteDialog);
+
   els.bulkClear.addEventListener("click", clearBulkSelection);
 
   els.exportExcel.addEventListener("click", exportMaterialLog);
@@ -5357,6 +5477,7 @@ async function init() {
   els.itemDetailsClose.addEventListener("click", () => els.itemDetailsDialog.close());
 
   els.reportType.addEventListener("change", renderProviderReport);
+  els.reportGroup.addEventListener("change", renderProviderReport);
   els.reportProject.addEventListener("change", renderProviderReport);
   els.reportProvider.addEventListener("change", renderProviderReport);
   els.printProviderReport.addEventListener("click", printProviderReport);
@@ -5410,6 +5531,13 @@ async function init() {
 
   els.deliveryCancel.addEventListener("click", closeDeliveryDialog);
   els.deliveryDialogClose.addEventListener("click", closeDeliveryDialog);
+
+  els.bulkNoteForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveBulkNote();
+  });
+  els.bulkNoteCancel.addEventListener("click", closeBulkNoteDialog);
+  els.bulkNoteClose.addEventListener("click", closeBulkNoteDialog);
 
   els.developmentNoteForm.addEventListener("submit", (event) => {
     event.preventDefault();
