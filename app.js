@@ -67,6 +67,7 @@ const state = {
   supplierAliases: {},
   categoryAliases: {},
   documentTemplates: [],
+  deletedDocumentTemplateIds: [],
   submittals: [],
   submittalDraft: { rowKeys: [], attachments: [] },
   developmentNotes: [],
@@ -555,6 +556,10 @@ function mergeSharedState(currentState, existingState = {}) {
       mergedRowsByProject[projectId] = rows.filter((row) => !deletedKeys.has(rowKey(row)));
     }
   });
+  const deletedDocumentTemplateIds = [...new Set([
+    ...(existingState.deletedDocumentTemplateIds || []),
+    ...(currentState.deletedDocumentTemplateIds || []),
+  ])];
   return {
     ...existingState,
     ...currentState,
@@ -577,7 +582,9 @@ function mergeSharedState(currentState, existingState = {}) {
       ...(existingState.categoryAliases || {}),
       ...(currentState.categoryAliases || {}),
     },
-    documentTemplates: mergeRecordsById(currentState.documentTemplates, existingState.documentTemplates),
+    documentTemplates: mergeRecordsById(currentState.documentTemplates, existingState.documentTemplates)
+      .filter((template) => !deletedDocumentTemplateIds.includes(template.id)),
+    deletedDocumentTemplateIds,
     submittals: mergeRecordsById(currentState.submittals, existingState.submittals)
       .sort((a, b) => clean(b.createdAt).localeCompare(clean(a.createdAt))),
     activityLog: [...new Map([
@@ -841,6 +848,7 @@ function collectSharedState() {
     supplierAliases: state.supplierAliases,
     categoryAliases: state.categoryAliases,
     documentTemplates: state.documentTemplates,
+    deletedDocumentTemplateIds: state.deletedDocumentTemplateIds,
     submittals: state.submittals,
     developmentNotes: state.developmentNotes,
     activityLog: state.activityLog,
@@ -859,6 +867,7 @@ function restorePendingSharedSave() {
     supplierAliases: state.supplierAliases,
     categoryAliases: state.categoryAliases,
     documentTemplates: state.documentTemplates,
+    deletedDocumentTemplateIds: state.deletedDocumentTemplateIds,
     submittals: state.submittals,
     developmentNotes: state.developmentNotes,
     activityLog: state.activityLog,
@@ -871,6 +880,7 @@ function restorePendingSharedSave() {
   state.supplierAliases = merged.supplierAliases || state.supplierAliases;
   state.categoryAliases = merged.categoryAliases || state.categoryAliases;
   state.documentTemplates = merged.documentTemplates || state.documentTemplates;
+  state.deletedDocumentTemplateIds = merged.deletedDocumentTemplateIds || state.deletedDocumentTemplateIds;
   state.submittals = merged.submittals || state.submittals;
   state.developmentNotes = merged.developmentNotes || state.developmentNotes;
   state.activityLog = merged.activityLog || state.activityLog;
@@ -994,6 +1004,7 @@ async function loadSharedState() {
       state.supplierAliases = shared.supplierAliases || {};
       state.categoryAliases = shared.categoryAliases || {};
       state.documentTemplates = Array.isArray(shared.documentTemplates) ? shared.documentTemplates : [];
+      state.deletedDocumentTemplateIds = Array.isArray(shared.deletedDocumentTemplateIds) ? shared.deletedDocumentTemplateIds : [];
       state.submittals = Array.isArray(shared.submittals) ? shared.submittals : [];
       state.developmentNotes = Array.isArray(shared.developmentNotes) ? shared.developmentNotes : [];
       state.activityLog = Array.isArray(shared.activityLog) ? shared.activityLog : [];
@@ -1046,6 +1057,7 @@ async function maybeMigrateLocalStorageToSupabase() {
     state.supplierAliases = localState.supplierAliases || {};
     state.categoryAliases = localState.categoryAliases || {};
     state.documentTemplates = localState.documentTemplates || [];
+    state.deletedDocumentTemplateIds = localState.deletedDocumentTemplateIds || [];
     state.submittals = localState.submittals || [];
     state.developmentNotes = localState.developmentNotes || [];
     state.adminListsLoadedFromCloud = true;
@@ -1113,6 +1125,7 @@ async function saveSharedState() {
     state.rowsByProject = mergedState.rowsByProject || state.rowsByProject;
     state.deletedRowsByProject = mergedState.deletedRowsByProject || state.deletedRowsByProject;
     state.documentTemplates = mergedState.documentTemplates || state.documentTemplates;
+    state.deletedDocumentTemplateIds = mergedState.deletedDocumentTemplateIds || state.deletedDocumentTemplateIds;
     state.submittals = mergedState.submittals || state.submittals;
     state.activityLog = mergedState.activityLog || state.activityLog;
     state.cloudUpdatedAt = savedRecord.updated_at;
@@ -1231,6 +1244,7 @@ function collectLocalStorageSharedState() {
     supplierAliases: {},
     categoryAliases: {},
     documentTemplates: [],
+    deletedDocumentTemplateIds: [],
     submittals: [],
     developmentNotes: safeJsonParse(localStorage.getItem(DEVELOPMENT_NOTES_PREF_KEY), []),
     updatedAt: new Date().toISOString(),
@@ -5482,6 +5496,7 @@ async function removeDocumentTemplate(id) {
     return;
   }
   state.documentTemplates = state.documentTemplates.filter((item) => item.id !== id);
+  state.deletedDocumentTemplateIds = [...new Set([...state.deletedDocumentTemplateIds, id])];
   queueSharedSave();
   renderDocuments();
 }
@@ -5559,11 +5574,14 @@ function closeSubmittalDialog() {
   els.submittalDialog.close();
 }
 
-async function signedStorageBytes(path) {
+async function signedStorageBytes(path, label = "PDF") {
   const { data, error } = await state.supabaseClient.storage.from(SUBMITTAL_FILE_BUCKET).createSignedUrl(path, 300);
-  if (error || !data?.signedUrl) throw error || new Error("A private file link could not be created.");
+  if (error || !data?.signedUrl) {
+    const detail = clean(error?.message);
+    throw new Error(`${label} could not be found in shared storage${detail ? ` (${detail})` : ""}.`);
+  }
   const response = await fetch(data.signedUrl);
-  if (!response.ok) throw new Error(`A PDF could not be loaded (${response.status}).`);
+  if (!response.ok) throw new Error(`${label} could not be loaded (${response.status}).`);
   return response.arrayBuffer();
 }
 
@@ -5583,7 +5601,13 @@ async function buildSubmittalPackage() {
   const project = activeProject();
   const template = state.documentTemplates.find((item) => item.id === project?.submittalTemplateId);
   if (!template) throw new Error("No submittal form is assigned to this project.");
-  const pdf = await PDFLib.PDFDocument.load(await signedStorageBytes(template.path));
+  let templateBytes;
+  try {
+    templateBytes = await signedStorageBytes(template.path, `The assigned form "${template.name}"`);
+  } catch (error) {
+    throw new Error(`${error.message} An Admin should upload the form again in Documents and reassign it to this project.`);
+  }
+  const pdf = await PDFLib.PDFDocument.load(templateBytes);
   const form = pdf.getForm();
   const settings = project.submittalSettings || {};
   setPdfText(form, "PROJECT", project.name);
@@ -5608,10 +5632,15 @@ async function buildSubmittalPackage() {
   const existingFiles = rows.flatMap((row) => submittalFiles(row[FIELD.submittalFiles]))
     .filter((file) => clean(file.name).toLowerCase().endsWith(".pdf") && clean(file.path));
   const addedFiles = [...(els.submittalProductFiles.files || [])];
+  const skippedFiles = [];
   for (const file of existingFiles) {
-    const source = await PDFLib.PDFDocument.load(await signedStorageBytes(file.path));
-    const pages = await pdf.copyPages(source, source.getPageIndices());
-    pages.forEach((page) => pdf.addPage(page));
+    try {
+      const source = await PDFLib.PDFDocument.load(await signedStorageBytes(file.path, `Product data file "${file.name}"`));
+      const pages = await pdf.copyPages(source, source.getPageIndices());
+      pages.forEach((page) => pdf.addPage(page));
+    } catch {
+      skippedFiles.push(clean(file.name) || "Unnamed product data file");
+    }
   }
   for (const file of addedFiles) {
     const source = await PDFLib.PDFDocument.load(await file.arrayBuffer());
@@ -5642,7 +5671,7 @@ async function buildSubmittalPackage() {
   setPdfText(form, "Text18", els.submittalContractorBy.value);
   setPdfText(form, "Text19", els.submittalSubmitterTitle.value);
   setPdfText(form, "DATE", submittalDisplayDate(els.submittalContractorDate.value));
-  return pdf.save();
+  return { bytes: await pdf.save(), skippedFiles };
 }
 
 async function generateSubmittal(event) {
@@ -5653,7 +5682,7 @@ async function generateSubmittal(event) {
   submit.disabled = true;
   els.submittalStatusMessage.textContent = "Generating and saving the submittal package...";
   try {
-    const bytes = await buildSubmittalPackage();
+    const { bytes, skippedFiles } = await buildSubmittalPackage();
     const id = storageRecordId("submittal");
     const fileName = `${safeFileName(`Submittal ${clean(els.submittalNumber.value)} - ${activeProject().name}`)}.pdf`;
     const path = `packages/${activeProject().id}/${id}/${fileName}`;
@@ -5686,7 +5715,9 @@ async function generateSubmittal(event) {
     state.submittals.unshift(record);
     state.submittalDraft.recordId = id;
     queueSharedSave();
-    els.submittalStatusMessage.textContent = "Package saved. Download it, prepare the email, then mark it sent after delivery.";
+    els.submittalStatusMessage.textContent = skippedFiles.length
+      ? `Package saved. ${skippedFiles.length} unavailable older attachment${skippedFiles.length === 1 ? " was" : "s were"} skipped: ${skippedFiles.join(", ")}.`
+      : "Package saved. Download it, prepare the email, then mark it sent after delivery.";
     [els.submittalDownload, els.submittalPrepareEmail, els.submittalMarkSent].forEach((button) => { button.hidden = false; });
     renderDocuments();
   } catch (error) {
