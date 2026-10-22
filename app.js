@@ -257,8 +257,11 @@ const els = {
   projectTemplateForm: document.querySelector("#projectTemplateForm"),
   submittalContractor: document.querySelector("#submittalContractor"),
   submittalContractorProject: document.querySelector("#submittalContractorProject"),
+  submittalProjectLocation: document.querySelector("#submittalProjectLocation"),
   submittalEngineer: document.querySelector("#submittalEngineer"),
   submittalEngineerProject: document.querySelector("#submittalEngineerProject"),
+  submittalEngineerAttention: document.querySelector("#submittalEngineerAttention"),
+  submittalEngineerAddress: document.querySelector("#submittalEngineerAddress"),
   submittalLogCount: document.querySelector("#submittalLogCount"),
   submittalLogHead: document.querySelector("#submittalLogHead"),
   submittalLogBody: document.querySelector("#submittalLogBody"),
@@ -268,12 +271,16 @@ const els = {
   submittalSelectedItems: document.querySelector("#submittalSelectedItems"),
   submittalTemplateName: document.querySelector("#submittalTemplateName"),
   submittalNumber: document.querySelector("#submittalNumber"),
+  submittalRevision: document.querySelector("#submittalRevision"),
   submittalSpec: document.querySelector("#submittalSpec"),
+  submittalProvider: document.querySelector("#submittalProvider"),
   submittalManufacturer: document.querySelector("#submittalManufacturer"),
   submittalDescription: document.querySelector("#submittalDescription"),
+  submittalIntendedUse: document.querySelector("#submittalIntendedUse"),
   submittalDeviationType: document.querySelector("#submittalDeviationType"),
   submittalDeviations: document.querySelector("#submittalDeviations"),
   submittalContractorBy: document.querySelector("#submittalContractorBy"),
+  submittalSubmitterTitle: document.querySelector("#submittalSubmitterTitle"),
   submittalContractorDate: document.querySelector("#submittalContractorDate"),
   submittalManufacturerBy: document.querySelector("#submittalManufacturerBy"),
   submittalManufacturerDate: document.querySelector("#submittalManufacturerDate"),
@@ -471,8 +478,11 @@ function normalizeProject(project) {
     submittalSettings: {
       contractor: clean(project?.submittalSettings?.contractor),
       contractorProjectNo: clean(project?.submittalSettings?.contractorProjectNo),
+      projectLocation: clean(project?.submittalSettings?.projectLocation),
       engineer: clean(project?.submittalSettings?.engineer),
       engineerProjectNo: clean(project?.submittalSettings?.engineerProjectNo),
+      engineerAttention: clean(project?.submittalSettings?.engineerAttention),
+      engineerAddress: clean(project?.submittalSettings?.engineerAddress),
     },
   };
 }
@@ -740,12 +750,16 @@ function updateSharedEditingControls() {
     els.bulkNoteInitials,
     els.bulkNoteText,
     els.submittalNumber,
+    els.submittalRevision,
     els.submittalSpec,
+    els.submittalProvider,
     els.submittalManufacturer,
     els.submittalDescription,
+    els.submittalIntendedUse,
     els.submittalDeviationType,
     els.submittalDeviations,
     els.submittalContractorBy,
+    els.submittalSubmitterTitle,
     els.submittalContractorDate,
     els.submittalManufacturerBy,
     els.submittalManufacturerDate,
@@ -778,6 +792,7 @@ function updateSharedEditingControls() {
   if (els.createSubmittal) els.createSubmittal.disabled = disabled || state.selectedBulkRows.size === 0;
   [els.templateName, els.templateFile, els.templateUploadForm?.querySelector("button"), els.projectTemplate,
     els.submittalContractor, els.submittalContractorProject, els.submittalEngineer, els.submittalEngineerProject,
+    els.submittalProjectLocation, els.submittalEngineerAttention, els.submittalEngineerAddress,
     els.projectTemplateForm?.querySelector("button")].filter(Boolean).forEach((control) => {
     control.disabled = disabled || state.currentRole !== "admin";
   });
@@ -5407,8 +5422,11 @@ function fillProjectTemplateForm() {
   els.projectTemplate.value = clean(project.submittalTemplateId);
   els.submittalContractor.value = clean(settings.contractor);
   els.submittalContractorProject.value = clean(settings.contractorProjectNo);
+  els.submittalProjectLocation.value = clean(settings.projectLocation);
   els.submittalEngineer.value = clean(settings.engineer);
   els.submittalEngineerProject.value = clean(settings.engineerProjectNo);
+  els.submittalEngineerAttention.value = clean(settings.engineerAttention);
+  els.submittalEngineerAddress.value = clean(settings.engineerAddress);
 }
 
 async function uploadDocumentTemplate(event) {
@@ -5477,8 +5495,11 @@ function saveProjectTemplateSetup(event) {
   project.submittalSettings = {
     contractor: clean(els.submittalContractor.value),
     contractorProjectNo: clean(els.submittalContractorProject.value),
+    projectLocation: clean(els.submittalProjectLocation.value),
     engineer: clean(els.submittalEngineer.value),
     engineerProjectNo: clean(els.submittalEngineerProject.value),
+    engineerAttention: clean(els.submittalEngineerAttention.value),
+    engineerAddress: clean(els.submittalEngineerAddress.value),
   };
   saveProjects();
   queueSharedSave();
@@ -5511,12 +5532,16 @@ function openCreateSubmittal() {
   els.submittalSelectedItems.innerHTML = rows.map((row) => `<div><strong>${escapeHtml(clean(row[FIELD.item]) || "Untitled item")}</strong><span>${escapeHtml(clean(row[FIELD.tag]))}</span></div>`).join("");
   els.submittalTemplateName.value = template.name;
   els.submittalNumber.value = nextSubmittalNumber(project.id);
+  els.submittalRevision.value = "0";
   els.submittalSpec.value = specs.join(", ");
+  els.submittalProvider.value = providers.join(", ");
   els.submittalManufacturer.value = providers.join(", ");
   els.submittalDescription.value = rows.map((row) => clean(row[FIELD.item])).filter(Boolean).join("; ");
+  els.submittalIntendedUse.value = uniqueSorted(rows.map((row) => clean(row[FIELD.area])).filter(Boolean)).join(", ");
   els.submittalDeviationType.value = "none";
   els.submittalDeviations.value = "";
   els.submittalContractorBy.value = clean(state.userInitials).toUpperCase();
+  els.submittalSubmitterTitle.value = "";
   els.submittalContractorDate.value = new Date().toISOString().slice(0, 10);
   els.submittalManufacturerBy.value = "";
   els.submittalManufacturerDate.value = "";
@@ -5595,6 +5620,28 @@ async function buildSubmittalPackage() {
   }
   setPdfText(form, "Page", "1");
   setPdfText(form, "of", String(pdf.getPageCount()));
+
+  // Northeast Earth contractor form. Its source PDF uses several generic and
+  // duplicated field names, so these mappings intentionally follow page position.
+  setPdfText(form, "ENGINEER’S PROJECT #", settings.contractorProjectNo);
+  setPdfText(form, "ENGINEER’S PROJECT # (1)", settings.engineerProjectNo);
+  setPdfText(form, "Text3", project.name);
+  setPdfText(form, "PROJECT LOCATION", settings.projectLocation);
+  setPdfText(form, "REVISION #", els.submittalSpec.value);
+  setPdfText(form, "REVISION # (1)", els.submittalNumber.value);
+  setPdfText(form, "Text20", els.submittalRevision.value);
+  setPdfText(form, "PRODUCT NAME / DESCRIPTION", els.submittalDescription.value);
+  setPdfText(form, "REVISION # (3)", els.submittalProvider.value);
+  setPdfText(form, "REVISION # (4)", els.submittalManufacturer.value);
+  setPdfText(form, "Text12", els.submittalIntendedUse.value);
+  setPdfText(form, "DEVIATIONS & CLARIFICATIONS", els.submittalDeviationType.value === "none" ? "None" : els.submittalDeviations.value);
+  setPdfText(form, "Text14", els.submittalContractorBy.value);
+  setPdfText(form, "Text15", settings.engineer);
+  setPdfText(form, "Text16", settings.engineerAttention);
+  setPdfText(form, "Text17", settings.engineerAddress);
+  setPdfText(form, "Text18", els.submittalContractorBy.value);
+  setPdfText(form, "Text19", els.submittalSubmitterTitle.value);
+  setPdfText(form, "DATE", submittalDisplayDate(els.submittalContractorDate.value));
   return pdf.save();
 }
 
@@ -5620,7 +5667,9 @@ async function generateSubmittal(event) {
       projectId: state.activeProjectId,
       rowKeys: [...state.submittalDraft.rowKeys],
       number: clean(els.submittalNumber.value),
+      revision: clean(els.submittalRevision.value),
       specificationSection: clean(els.submittalSpec.value),
+      provider: clean(els.submittalProvider.value),
       manufacturer: clean(els.submittalManufacturer.value),
       description: clean(els.submittalDescription.value),
       templateId: activeProject().submittalTemplateId,

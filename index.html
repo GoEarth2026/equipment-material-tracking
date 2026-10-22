@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Equipment &amp; Material Tracking</title>
-    <link rel="stylesheet" href="./styles.css?v=submittal-workflow1" />
+    <link rel="stylesheet" href="./styles.css?v=submittal-workflow2" />
   </head>
   <body>
     <section class="auth-gate" id="authGate" hidden>
@@ -175,8 +175,11 @@
                 <label>Assigned Form<select id="projectTemplateSelect"></select></label>
                 <label>Contractor<input id="submittalContractor" type="text" /></label>
                 <label>Contractor Project No.<input id="submittalContractorProject" type="text" /></label>
+                <label>Project Location<input id="submittalProjectLocation" type="text" /></label>
                 <label>Engineer<input id="submittalEngineer" type="text" /></label>
                 <label>Engineer Project No.<input id="submittalEngineerProject" type="text" /></label>
+                <label>Engineer Attention<input id="submittalEngineerAttention" type="text" /></label>
+                <label>Engineer Address<textarea id="submittalEngineerAddress" rows="2"></textarea></label>
                 <button class="ghost-button" type="submit">Save Project Setup</button>
               </form>
             </section>
@@ -449,12 +452,16 @@
         <div class="submittal-form-grid">
           <label>Form<input id="submittalTemplateName" type="text" readonly /></label>
           <label>Submittal Number<input id="submittalNumber" type="text" required /></label>
+          <label>Revision Number<input id="submittalRevision" type="text" /></label>
           <label>Specification Section<input id="submittalSpec" type="text" /></label>
+          <label>Provider<input id="submittalProvider" type="text" /></label>
           <label>Manufacturer<input id="submittalManufacturer" type="text" /></label>
           <label class="wide-field">Description<textarea id="submittalDescription" rows="3"></textarea></label>
+          <label class="wide-field">Intended Use<textarea id="submittalIntendedUse" rows="3"></textarea></label>
           <label>Deviations<select id="submittalDeviationType"><option value="none">No Deviations</option><option value="list">List of Deviations</option></select></label>
           <label class="wide-field">Deviation List<textarea id="submittalDeviations" rows="3"></textarea></label>
           <label>Contractor By<input id="submittalContractorBy" type="text" /></label>
+          <label>Submitted By Title<input id="submittalSubmitterTitle" type="text" /></label>
           <label>Contractor Date<input id="submittalContractorDate" type="date" /></label>
           <label>Manufacturer By<input id="submittalManufacturerBy" type="text" /></label>
           <label>Manufacturer Date<input id="submittalManufacturerDate" type="date" /></label>
@@ -495,6 +502,6 @@
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
     <script src="./supabase-config.js"></script>
-    <script src="./app.js?v=submittal-workflow1"></script>
+    <script src="./app.js?v=submittal-workflow2"></script>
   </body>
 </html>
