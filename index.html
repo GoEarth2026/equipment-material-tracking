@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Equipment &amp; Material Tracking</title>
-    <link rel="stylesheet" href="./styles.css?v=provider-clean-hard1" />
+    <link rel="stylesheet" href="./styles.css?v=submittal-workflow1" />
   </head>
   <body>
     <section class="auth-gate" id="authGate" hidden>
@@ -38,6 +38,7 @@
           <button class="nav-tab" data-view="log" type="button">Material Log</button>
           <button class="nav-tab" data-view="procurement" type="button">Procurement</button>
           <button class="nav-tab" data-view="reports" type="button">Reports</button>
+          <button class="nav-tab" data-view="documents" type="button">Documents</button>
           <button class="nav-tab" data-view="import" type="button">Import Log</button>
           <button class="nav-tab" data-view="development" type="button">Development Notes</button>
           <button class="nav-tab" data-view="admin" type="button">Admin</button>
@@ -133,6 +134,7 @@
               <input id="bulkEditValue" type="text" />
             </label>
             <div class="bulk-edit-actions">
+              <button class="ghost-button" id="createSubmittalButton" type="button">Create Submittal</button>
               <button class="ghost-button" id="bulkAddNoteButton" type="button">Add Note to Selected Rows</button>
               <button class="ghost-button" id="bulkApplyButton" type="button">Apply to Selected Rows</button>
               <button class="ghost-button" id="bulkClearButton" type="button">Clear Selection</button>
@@ -149,6 +151,40 @@
               <tbody id="logBody"></tbody>
             </table>
           </div>
+        </section>
+
+        <section class="view" id="documentsView">
+          <div class="documents-layout">
+            <section class="panel document-panel">
+              <div class="section-heading">
+                <h3>Submittal Forms</h3>
+                <span id="templateCount"></span>
+              </div>
+              <form class="document-upload-form" id="templateUploadForm">
+                <input id="templateNameInput" type="text" placeholder="Form name" required />
+                <input id="templateFileInput" type="file" accept="application/pdf,.pdf" required />
+                <button class="ghost-button" type="submit">Upload Form</button>
+              </form>
+              <div class="admin-list" id="templateList"></div>
+            </section>
+
+            <section class="panel document-panel">
+              <div class="section-heading"><h3>Project Submittal Setup</h3></div>
+              <form class="project-template-form" id="projectTemplateForm">
+                <label>Project<select id="documentProjectSelect"></select></label>
+                <label>Assigned Form<select id="projectTemplateSelect"></select></label>
+                <label>Contractor<input id="submittalContractor" type="text" /></label>
+                <label>Contractor Project No.<input id="submittalContractorProject" type="text" /></label>
+                <label>Engineer<input id="submittalEngineer" type="text" /></label>
+                <label>Engineer Project No.<input id="submittalEngineerProject" type="text" /></label>
+                <button class="ghost-button" type="submit">Save Project Setup</button>
+              </form>
+            </section>
+          </div>
+          <section class="panel submittal-log-panel">
+            <div class="section-heading"><h3>Project Submittal Log</h3><span id="submittalLogCount"></span></div>
+            <div class="table-shell"><table class="report-table"><thead id="submittalLogHead"></thead><tbody id="submittalLogBody"></tbody></table></div>
+          </section>
         </section>
 
         <section class="view" id="procurementView">
@@ -403,6 +439,42 @@
       </form>
     </dialog>
 
+    <dialog class="submittal-dialog" id="submittalDialog">
+      <form method="dialog" id="submittalForm">
+        <div class="delivery-dialog-header">
+          <div><h3>Create Submittal</h3><p id="submittalDialogSummary" class="delivery-dialog-item"></p></div>
+          <button class="icon-row-button" id="submittalDialogClose" type="button" aria-label="Close submittal form">×</button>
+        </div>
+        <div class="submittal-item-list" id="submittalSelectedItems"></div>
+        <div class="submittal-form-grid">
+          <label>Form<input id="submittalTemplateName" type="text" readonly /></label>
+          <label>Submittal Number<input id="submittalNumber" type="text" required /></label>
+          <label>Specification Section<input id="submittalSpec" type="text" /></label>
+          <label>Manufacturer<input id="submittalManufacturer" type="text" /></label>
+          <label class="wide-field">Description<textarea id="submittalDescription" rows="3"></textarea></label>
+          <label>Deviations<select id="submittalDeviationType"><option value="none">No Deviations</option><option value="list">List of Deviations</option></select></label>
+          <label class="wide-field">Deviation List<textarea id="submittalDeviations" rows="3"></textarea></label>
+          <label>Contractor By<input id="submittalContractorBy" type="text" /></label>
+          <label>Contractor Date<input id="submittalContractorDate" type="date" /></label>
+          <label>Manufacturer By<input id="submittalManufacturerBy" type="text" /></label>
+          <label>Manufacturer Date<input id="submittalManufacturerDate" type="date" /></label>
+          <label class="wide-field">Additional Product Data PDFs<input id="submittalProductFiles" type="file" accept="application/pdf,.pdf" multiple /></label>
+          <label class="wide-field">To<input id="submittalRecipients" type="text" placeholder="engineer@example.com, reviewer@example.com" /></label>
+          <label class="wide-field">CC<input id="submittalCc" type="text" /></label>
+          <label class="wide-field">Email Subject<input id="submittalEmailSubject" type="text" /></label>
+          <label class="wide-field">Email Message<textarea id="submittalEmailBody" rows="4"></textarea></label>
+        </div>
+        <p class="submittal-status-message" id="submittalStatusMessage"></p>
+        <div class="delivery-dialog-actions">
+          <button class="ghost-button" id="submittalCancel" type="button">Cancel</button>
+          <button class="ghost-button" id="submittalDownload" type="button" hidden>Download Package</button>
+          <button class="ghost-button" id="submittalPrepareEmail" type="button" hidden>Prepare Email</button>
+          <button class="ghost-button" id="submittalMarkSent" type="button" hidden>Mark Sent</button>
+          <button class="ghost-button primary-action" type="submit">Generate Package</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog class="item-details-dialog" id="itemDetailsDialog">
       <div class="delivery-dialog-header">
         <div><h3 id="itemDetailsTitle">Item Details</h3><p id="itemDetailsSubtitle" class="delivery-dialog-item"></p></div>
@@ -421,7 +493,8 @@
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
     <script src="./supabase-config.js"></script>
-    <script src="./app.js?v=bulk-notes-summary1"></script>
+    <script src="./app.js?v=submittal-workflow1"></script>
   </body>
 </html>

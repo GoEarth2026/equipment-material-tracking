@@ -66,6 +66,9 @@ const state = {
   },
   supplierAliases: {},
   categoryAliases: {},
+  documentTemplates: [],
+  submittals: [],
+  submittalDraft: { rowKeys: [], attachments: [] },
   developmentNotes: [],
   userInitials: "",
   selectedImportFile: null,
@@ -91,7 +94,7 @@ const state = {
   },
 };
 
-const VALID_VIEWS = new Set(["dashboard", "log", "procurement", "reports", "import", "development", "admin"]);
+const VALID_VIEWS = new Set(["dashboard", "log", "procurement", "reports", "documents", "import", "development", "admin"]);
 const ACTION_COLUMN_WIDTH = 148;
 const DEFAULT_COLUMN_WIDTH = 150;
 const DEFAULT_WIDE_COLUMN_WIDTHS = {
@@ -183,6 +186,7 @@ const els = {
   bulkColumnList: document.querySelector("#bulkColumnList"),
   bulkEditValue: document.querySelector("#bulkEditValue"),
   bulkAddNote: document.querySelector("#bulkAddNoteButton"),
+  createSubmittal: document.querySelector("#createSubmittalButton"),
   bulkApply: document.querySelector("#bulkApplyButton"),
   bulkClear: document.querySelector("#bulkClearButton"),
   exportExcel: document.querySelector("#exportExcelButton"),
@@ -243,6 +247,47 @@ const els = {
   backupPanel: document.querySelector("#backupPanel"),
   backupList: document.querySelector("#backupList"),
   backupCount: document.querySelector("#backupCount"),
+  templateUploadForm: document.querySelector("#templateUploadForm"),
+  templateName: document.querySelector("#templateNameInput"),
+  templateFile: document.querySelector("#templateFileInput"),
+  templateList: document.querySelector("#templateList"),
+  templateCount: document.querySelector("#templateCount"),
+  documentProject: document.querySelector("#documentProjectSelect"),
+  projectTemplate: document.querySelector("#projectTemplateSelect"),
+  projectTemplateForm: document.querySelector("#projectTemplateForm"),
+  submittalContractor: document.querySelector("#submittalContractor"),
+  submittalContractorProject: document.querySelector("#submittalContractorProject"),
+  submittalEngineer: document.querySelector("#submittalEngineer"),
+  submittalEngineerProject: document.querySelector("#submittalEngineerProject"),
+  submittalLogCount: document.querySelector("#submittalLogCount"),
+  submittalLogHead: document.querySelector("#submittalLogHead"),
+  submittalLogBody: document.querySelector("#submittalLogBody"),
+  submittalDialog: document.querySelector("#submittalDialog"),
+  submittalForm: document.querySelector("#submittalForm"),
+  submittalDialogSummary: document.querySelector("#submittalDialogSummary"),
+  submittalSelectedItems: document.querySelector("#submittalSelectedItems"),
+  submittalTemplateName: document.querySelector("#submittalTemplateName"),
+  submittalNumber: document.querySelector("#submittalNumber"),
+  submittalSpec: document.querySelector("#submittalSpec"),
+  submittalManufacturer: document.querySelector("#submittalManufacturer"),
+  submittalDescription: document.querySelector("#submittalDescription"),
+  submittalDeviationType: document.querySelector("#submittalDeviationType"),
+  submittalDeviations: document.querySelector("#submittalDeviations"),
+  submittalContractorBy: document.querySelector("#submittalContractorBy"),
+  submittalContractorDate: document.querySelector("#submittalContractorDate"),
+  submittalManufacturerBy: document.querySelector("#submittalManufacturerBy"),
+  submittalManufacturerDate: document.querySelector("#submittalManufacturerDate"),
+  submittalProductFiles: document.querySelector("#submittalProductFiles"),
+  submittalRecipients: document.querySelector("#submittalRecipients"),
+  submittalCc: document.querySelector("#submittalCc"),
+  submittalEmailSubject: document.querySelector("#submittalEmailSubject"),
+  submittalEmailBody: document.querySelector("#submittalEmailBody"),
+  submittalStatusMessage: document.querySelector("#submittalStatusMessage"),
+  submittalCancel: document.querySelector("#submittalCancel"),
+  submittalClose: document.querySelector("#submittalDialogClose"),
+  submittalDownload: document.querySelector("#submittalDownload"),
+  submittalPrepareEmail: document.querySelector("#submittalPrepareEmail"),
+  submittalMarkSent: document.querySelector("#submittalMarkSent"),
   downloadTemplate: document.querySelector("#downloadTemplateButton"),
   importProject: document.querySelector("#importProjectSelect"),
   importMode: document.querySelector("#importMode"),
@@ -422,7 +467,25 @@ function normalizeProject(project) {
     name: clean(project?.name) || projectNameFromId(id),
     archived: Boolean(project?.archived),
     baseline: Boolean(project?.baseline || id === "hampton-wwtp-phase-ii"),
+    submittalTemplateId: clean(project?.submittalTemplateId),
+    submittalSettings: {
+      contractor: clean(project?.submittalSettings?.contractor),
+      contractorProjectNo: clean(project?.submittalSettings?.contractorProjectNo),
+      engineer: clean(project?.submittalSettings?.engineer),
+      engineerProjectNo: clean(project?.submittalSettings?.engineerProjectNo),
+    },
   };
+}
+
+function mergeRecordsById(current = [], existing = []) {
+  const records = new Map();
+  [...existing, ...current].filter((item) => clean(item?.id)).forEach((item) => {
+    const previous = records.get(item.id);
+    const itemTime = Date.parse(item.updatedAt || item.sentAt || item.createdAt || 0) || 0;
+    const previousTime = Date.parse(previous?.updatedAt || previous?.sentAt || previous?.createdAt || 0) || 0;
+    if (!previous || itemTime >= previousTime) records.set(item.id, item);
+  });
+  return [...records.values()];
 }
 
 function projectsWithStoredRows(projects = [], rowsByProject = {}) {
@@ -504,6 +567,9 @@ function mergeSharedState(currentState, existingState = {}) {
       ...(existingState.categoryAliases || {}),
       ...(currentState.categoryAliases || {}),
     },
+    documentTemplates: mergeRecordsById(currentState.documentTemplates, existingState.documentTemplates),
+    submittals: mergeRecordsById(currentState.submittals, existingState.submittals)
+      .sort((a, b) => clean(b.createdAt).localeCompare(clean(a.createdAt))),
     activityLog: [...new Map([
       ...(currentState.activityLog || []),
       ...(existingState.activityLog || []),
@@ -673,6 +739,21 @@ function updateSharedEditingControls() {
     els.deliveryNotes,
     els.bulkNoteInitials,
     els.bulkNoteText,
+    els.submittalNumber,
+    els.submittalSpec,
+    els.submittalManufacturer,
+    els.submittalDescription,
+    els.submittalDeviationType,
+    els.submittalDeviations,
+    els.submittalContractorBy,
+    els.submittalContractorDate,
+    els.submittalManufacturerBy,
+    els.submittalManufacturerDate,
+    els.submittalProductFiles,
+    els.submittalRecipients,
+    els.submittalCc,
+    els.submittalEmailSubject,
+    els.submittalEmailBody,
   ].filter(Boolean).forEach((control) => {
     control.disabled = disabled;
   });
@@ -685,6 +766,7 @@ function updateSharedEditingControls() {
     els.developmentNoteForm?.querySelector("button[type='submit']"),
     els.deliveryForm?.querySelector("button[type='submit']"),
     els.bulkNoteForm?.querySelector("button[type='submit']"),
+    els.submittalForm?.querySelector("button[type='submit']"),
   ].filter(Boolean).forEach((button) => {
     button.disabled = disabled;
   });
@@ -693,6 +775,12 @@ function updateSharedEditingControls() {
     control.disabled = disabled || state.currentRole !== "admin";
   });
   if (els.bulkAddNote) els.bulkAddNote.disabled = disabled || state.selectedBulkRows.size === 0;
+  if (els.createSubmittal) els.createSubmittal.disabled = disabled || state.selectedBulkRows.size === 0;
+  [els.templateName, els.templateFile, els.templateUploadForm?.querySelector("button"), els.projectTemplate,
+    els.submittalContractor, els.submittalContractorProject, els.submittalEngineer, els.submittalEngineerProject,
+    els.projectTemplateForm?.querySelector("button")].filter(Boolean).forEach((control) => {
+    control.disabled = disabled || state.currentRole !== "admin";
+  });
 
   document.querySelectorAll(
     "[data-edit-column], [data-provider-row], [data-category-row], [data-status-row], [data-checkbox-row], [data-bulk-row], [data-bulk-select-visible], #bulkColumnList input, [data-attach-submittal-row], [data-remove-submittal-file-row], [data-add-delivery-row], [data-edit-delivery-row], [data-remove-delivery-row], [data-add-note-row], [data-edit-note-row], [data-insert-row], [data-remove-row], [data-remove-list], [data-rename-status], [data-rename-supplier], [data-rename-category], [data-archive-project], [data-restore-project]",
@@ -737,6 +825,8 @@ function collectSharedState() {
     adminLists: state.adminLists,
     supplierAliases: state.supplierAliases,
     categoryAliases: state.categoryAliases,
+    documentTemplates: state.documentTemplates,
+    submittals: state.submittals,
     developmentNotes: state.developmentNotes,
     activityLog: state.activityLog,
     updatedAt: new Date().toISOString(),
@@ -753,6 +843,8 @@ function restorePendingSharedSave() {
     adminLists: state.adminLists,
     supplierAliases: state.supplierAliases,
     categoryAliases: state.categoryAliases,
+    documentTemplates: state.documentTemplates,
+    submittals: state.submittals,
     developmentNotes: state.developmentNotes,
     activityLog: state.activityLog,
   };
@@ -763,6 +855,8 @@ function restorePendingSharedSave() {
   state.adminLists = merged.adminLists || state.adminLists;
   state.supplierAliases = merged.supplierAliases || state.supplierAliases;
   state.categoryAliases = merged.categoryAliases || state.categoryAliases;
+  state.documentTemplates = merged.documentTemplates || state.documentTemplates;
+  state.submittals = merged.submittals || state.submittals;
   state.developmentNotes = merged.developmentNotes || state.developmentNotes;
   state.activityLog = merged.activityLog || state.activityLog;
   state.savePending = true;
@@ -884,6 +978,8 @@ async function loadSharedState() {
       state.adminLists = shared.adminLists || state.adminLists;
       state.supplierAliases = shared.supplierAliases || {};
       state.categoryAliases = shared.categoryAliases || {};
+      state.documentTemplates = Array.isArray(shared.documentTemplates) ? shared.documentTemplates : [];
+      state.submittals = Array.isArray(shared.submittals) ? shared.submittals : [];
       state.developmentNotes = Array.isArray(shared.developmentNotes) ? shared.developmentNotes : [];
       state.activityLog = Array.isArray(shared.activityLog) ? shared.activityLog : [];
       state.cloudUpdatedAt = data.updated_at || null;
@@ -934,6 +1030,8 @@ async function maybeMigrateLocalStorageToSupabase() {
     state.adminLists = localState.adminLists;
     state.supplierAliases = localState.supplierAliases || {};
     state.categoryAliases = localState.categoryAliases || {};
+    state.documentTemplates = localState.documentTemplates || [];
+    state.submittals = localState.submittals || [];
     state.developmentNotes = localState.developmentNotes || [];
     state.adminListsLoadedFromCloud = true;
     state.cloudReady = true;
@@ -999,6 +1097,8 @@ async function saveSharedState() {
     state.projects = mergedState.projects || state.projects;
     state.rowsByProject = mergedState.rowsByProject || state.rowsByProject;
     state.deletedRowsByProject = mergedState.deletedRowsByProject || state.deletedRowsByProject;
+    state.documentTemplates = mergedState.documentTemplates || state.documentTemplates;
+    state.submittals = mergedState.submittals || state.submittals;
     state.activityLog = mergedState.activityLog || state.activityLog;
     state.cloudUpdatedAt = savedRecord.updated_at;
     state.savePending = false;
@@ -1115,6 +1215,8 @@ function collectLocalStorageSharedState() {
     adminLists,
     supplierAliases: {},
     categoryAliases: {},
+    documentTemplates: [],
+    submittals: [],
     developmentNotes: safeJsonParse(localStorage.getItem(DEVELOPMENT_NOTES_PREF_KEY), []),
     updatedAt: new Date().toISOString(),
     migratedFromLocalStorage: true,
@@ -3459,6 +3561,7 @@ function renderBulkEditPanel() {
   const headers = bulkEditableHeaders();
   els.bulkSelectionCount.textContent = `${selectedCount} row${selectedCount === 1 ? "" : "s"} selected`;
   if (els.bulkAddNote) els.bulkAddNote.disabled = !canEditSharedData() || selectedCount === 0;
+  if (els.createSubmittal) els.createSubmittal.disabled = !canEditSharedData() || selectedCount === 0;
   els.bulkColumnList.innerHTML = headers.map((header) => `
     <label>
       <input type="checkbox" value="${escapeHtml(header)}" ${state.selectedBulkColumns.has(header) ? "checked" : ""} />
@@ -5288,6 +5391,327 @@ function renderAdmin() {
   updateSharedEditingControls();
 }
 
+function storageRecordId(prefix) {
+  return `${prefix}-${Date.now()}-${Math.floor(Math.random() * 1000000)}`;
+}
+
+function selectedDocumentProject() {
+  const id = clean(els.documentProject?.value) || state.activeProjectId;
+  return state.projects.find((project) => project.id === id) || activeProject();
+}
+
+function fillProjectTemplateForm() {
+  const project = selectedDocumentProject();
+  if (!project) return;
+  const settings = project.submittalSettings || {};
+  els.projectTemplate.value = clean(project.submittalTemplateId);
+  els.submittalContractor.value = clean(settings.contractor);
+  els.submittalContractorProject.value = clean(settings.contractorProjectNo);
+  els.submittalEngineer.value = clean(settings.engineer);
+  els.submittalEngineerProject.value = clean(settings.engineerProjectNo);
+}
+
+async function uploadDocumentTemplate(event) {
+  event.preventDefault();
+  if (!requireAdminEditing("upload submittal forms")) return;
+  const file = els.templateFile.files?.[0];
+  if (!file || !file.name.toLowerCase().endsWith(".pdf")) {
+    alert("Select a PDF submittal form.");
+    return;
+  }
+  const id = storageRecordId("template");
+  const path = `templates/${id}/${safeFileName(file.name.replace(/\.pdf$/i, ""))}.pdf`;
+  const button = els.templateUploadForm.querySelector("button[type='submit']");
+  button.disabled = true;
+  button.textContent = "Uploading...";
+  try {
+    const { error } = await state.supabaseClient.storage.from(SUBMITTAL_FILE_BUCKET).upload(path, file, {
+      contentType: "application/pdf",
+      upsert: false,
+    });
+    if (error) throw error;
+    state.documentTemplates.unshift({
+      id,
+      name: clean(els.templateName.value) || file.name.replace(/\.pdf$/i, ""),
+      fileName: file.name,
+      path,
+      size: file.size,
+      createdAt: new Date().toISOString(),
+      createdBy: actorLabel(),
+    });
+    els.templateUploadForm.reset();
+    queueSharedSave();
+    renderDocuments();
+  } catch (error) {
+    alert(`The form could not be uploaded: ${error.message}`);
+  } finally {
+    button.textContent = "Upload Form";
+    updateSharedEditingControls();
+  }
+}
+
+async function removeDocumentTemplate(id) {
+  if (!requireAdminEditing("remove submittal forms")) return;
+  const template = state.documentTemplates.find((item) => item.id === id);
+  if (!template || !confirm(`Remove the form "${template.name}"?`)) return;
+  if (state.projects.some((project) => project.submittalTemplateId === id)) {
+    alert("This form is assigned to a project. Assign a different form before removing it.");
+    return;
+  }
+  const { error } = await state.supabaseClient.storage.from(SUBMITTAL_FILE_BUCKET).remove([template.path]);
+  if (error) {
+    alert(`The form could not be removed: ${error.message}`);
+    return;
+  }
+  state.documentTemplates = state.documentTemplates.filter((item) => item.id !== id);
+  queueSharedSave();
+  renderDocuments();
+}
+
+function saveProjectTemplateSetup(event) {
+  event.preventDefault();
+  if (!requireAdminEditing("change project submittal setup")) return;
+  const project = selectedDocumentProject();
+  if (!project) return;
+  project.submittalTemplateId = clean(els.projectTemplate.value);
+  project.submittalSettings = {
+    contractor: clean(els.submittalContractor.value),
+    contractorProjectNo: clean(els.submittalContractorProject.value),
+    engineer: clean(els.submittalEngineer.value),
+    engineerProjectNo: clean(els.submittalEngineerProject.value),
+  };
+  saveProjects();
+  queueSharedSave();
+  renderDocuments();
+  alert("Project submittal setup saved.");
+}
+
+function submittalDisplayDate(value) {
+  if (!value) return "";
+  const date = new Date(`${value}T12:00:00`);
+  return Number.isNaN(date.getTime()) ? clean(value) : date.toLocaleDateString();
+}
+
+function nextSubmittalNumber(projectId) {
+  const count = state.submittals.filter((item) => item.projectId === projectId).length + 1;
+  return String(count).padStart(3, "0");
+}
+
+function openCreateSubmittal() {
+  if (!requireSharedEditing()) return;
+  const rows = selectedBulkRows();
+  const project = activeProject();
+  const template = state.documentTemplates.find((item) => item.id === project?.submittalTemplateId);
+  if (!rows.length) return alert("Select at least one material log item first.");
+  if (!template) return alert("An Admin must assign a submittal form to this project in Documents first.");
+  state.submittalDraft = { rowKeys: rows.map(rowKey), attachments: [], recordId: "" };
+  const specs = uniqueSorted(rows.map((row) => clean(row[FIELD.spec])).filter(Boolean));
+  const providers = uniqueSorted(rows.map((row) => clean(row[FIELD.provider])).filter(Boolean));
+  els.submittalDialogSummary.textContent = `${project.name} · ${rows.length} selected item${rows.length === 1 ? "" : "s"}`;
+  els.submittalSelectedItems.innerHTML = rows.map((row) => `<div><strong>${escapeHtml(clean(row[FIELD.item]) || "Untitled item")}</strong><span>${escapeHtml(clean(row[FIELD.tag]))}</span></div>`).join("");
+  els.submittalTemplateName.value = template.name;
+  els.submittalNumber.value = nextSubmittalNumber(project.id);
+  els.submittalSpec.value = specs.join(", ");
+  els.submittalManufacturer.value = providers.join(", ");
+  els.submittalDescription.value = rows.map((row) => clean(row[FIELD.item])).filter(Boolean).join("; ");
+  els.submittalDeviationType.value = "none";
+  els.submittalDeviations.value = "";
+  els.submittalContractorBy.value = clean(state.userInitials).toUpperCase();
+  els.submittalContractorDate.value = new Date().toISOString().slice(0, 10);
+  els.submittalManufacturerBy.value = "";
+  els.submittalManufacturerDate.value = "";
+  els.submittalProductFiles.value = "";
+  els.submittalRecipients.value = "";
+  els.submittalCc.value = "";
+  els.submittalEmailSubject.value = `${project.name} - Submittal ${els.submittalNumber.value}`;
+  els.submittalEmailBody.value = `Please find attached Submittal ${els.submittalNumber.value} for ${project.name}.`;
+  els.submittalStatusMessage.textContent = "";
+  [els.submittalDownload, els.submittalPrepareEmail, els.submittalMarkSent].forEach((button) => { button.hidden = true; });
+  els.submittalDialog.showModal();
+}
+
+function closeSubmittalDialog() {
+  els.submittalDialog.close();
+}
+
+async function signedStorageBytes(path) {
+  const { data, error } = await state.supabaseClient.storage.from(SUBMITTAL_FILE_BUCKET).createSignedUrl(path, 300);
+  if (error || !data?.signedUrl) throw error || new Error("A private file link could not be created.");
+  const response = await fetch(data.signedUrl);
+  if (!response.ok) throw new Error(`A PDF could not be loaded (${response.status}).`);
+  return response.arrayBuffer();
+}
+
+function setPdfText(form, name, value) {
+  try { form.getTextField(name).setText(clean(value)); } catch { /* Template may omit this optional field. */ }
+}
+
+function setPdfCheck(form, name, checked) {
+  try {
+    const field = form.getCheckBox(name);
+    if (checked) field.check(); else field.uncheck();
+  } catch { /* Template may omit this optional field. */ }
+}
+
+async function buildSubmittalPackage() {
+  if (!window.PDFLib) throw new Error("The PDF tools did not load. Refresh and try again.");
+  const project = activeProject();
+  const template = state.documentTemplates.find((item) => item.id === project?.submittalTemplateId);
+  if (!template) throw new Error("No submittal form is assigned to this project.");
+  const pdf = await PDFLib.PDFDocument.load(await signedStorageBytes(template.path));
+  const form = pdf.getForm();
+  const settings = project.submittalSettings || {};
+  setPdfText(form, "PROJECT", project.name);
+  setPdfText(form, "CONTRACTORS PROJ NO", settings.contractorProjectNo);
+  setPdfText(form, "CONTRACTOR", settings.contractor);
+  setPdfText(form, "ENGINEERS PROJ NO", settings.engineerProjectNo);
+  setPdfText(form, "ENGINEER", settings.engineer);
+  setPdfText(form, "SPECIFICATION SECTION", els.submittalSpec.value);
+  setPdfText(form, "SEQUENTIAL NUMBER", els.submittalNumber.value);
+  setPdfText(form, "DESCRIPTION", els.submittalDescription.value);
+  setPdfText(form, "MANUFACTURER", els.submittalManufacturer.value);
+  const deviations = clean(els.submittalDeviations.value).split(/\n+/).filter(Boolean);
+  [1, 2, 3, 4].forEach((number, index) => setPdfText(form, `A COMPLETE LIST OF DEVIATIONS AS FOLLOWS a ${number}`, deviations[index] || ""));
+  setPdfText(form, "By", els.submittalContractorBy.value);
+  setPdfText(form, "Date", submittalDisplayDate(els.submittalContractorDate.value));
+  setPdfText(form, "By_2", els.submittalManufacturerBy.value);
+  setPdfText(form, "Date_2", submittalDisplayDate(els.submittalManufacturerDate.value));
+  setPdfCheck(form, "No Deviations", els.submittalDeviationType.value === "none");
+  setPdfCheck(form, "Deviation List", els.submittalDeviationType.value === "list");
+
+  const rows = selectedBulkRows();
+  const existingFiles = rows.flatMap((row) => submittalFiles(row[FIELD.submittalFiles]))
+    .filter((file) => clean(file.name).toLowerCase().endsWith(".pdf") && clean(file.path));
+  const addedFiles = [...(els.submittalProductFiles.files || [])];
+  for (const file of existingFiles) {
+    const source = await PDFLib.PDFDocument.load(await signedStorageBytes(file.path));
+    const pages = await pdf.copyPages(source, source.getPageIndices());
+    pages.forEach((page) => pdf.addPage(page));
+  }
+  for (const file of addedFiles) {
+    const source = await PDFLib.PDFDocument.load(await file.arrayBuffer());
+    const pages = await pdf.copyPages(source, source.getPageIndices());
+    pages.forEach((page) => pdf.addPage(page));
+  }
+  setPdfText(form, "Page", "1");
+  setPdfText(form, "of", String(pdf.getPageCount()));
+  return pdf.save();
+}
+
+async function generateSubmittal(event) {
+  event.preventDefault();
+  if (!requireSharedEditing()) return;
+  if (!els.submittalForm.reportValidity()) return;
+  const submit = els.submittalForm.querySelector("button[type='submit']");
+  submit.disabled = true;
+  els.submittalStatusMessage.textContent = "Generating and saving the submittal package...";
+  try {
+    const bytes = await buildSubmittalPackage();
+    const id = storageRecordId("submittal");
+    const fileName = `${safeFileName(`Submittal ${clean(els.submittalNumber.value)} - ${activeProject().name}`)}.pdf`;
+    const path = `packages/${activeProject().id}/${id}/${fileName}`;
+    const { error } = await state.supabaseClient.storage.from(SUBMITTAL_FILE_BUCKET).upload(path, new Blob([bytes], { type: "application/pdf" }), {
+      contentType: "application/pdf",
+      upsert: false,
+    });
+    if (error) throw error;
+    const record = {
+      id,
+      projectId: state.activeProjectId,
+      rowKeys: [...state.submittalDraft.rowKeys],
+      number: clean(els.submittalNumber.value),
+      specificationSection: clean(els.submittalSpec.value),
+      manufacturer: clean(els.submittalManufacturer.value),
+      description: clean(els.submittalDescription.value),
+      templateId: activeProject().submittalTemplateId,
+      fileName,
+      path,
+      recipients: clean(els.submittalRecipients.value),
+      cc: clean(els.submittalCc.value),
+      emailSubject: clean(els.submittalEmailSubject.value),
+      emailBody: clean(els.submittalEmailBody.value),
+      status: "Draft",
+      createdAt: new Date().toISOString(),
+      createdBy: actorLabel(),
+    };
+    state.submittals.unshift(record);
+    state.submittalDraft.recordId = id;
+    queueSharedSave();
+    els.submittalStatusMessage.textContent = "Package saved. Download it, prepare the email, then mark it sent after delivery.";
+    [els.submittalDownload, els.submittalPrepareEmail, els.submittalMarkSent].forEach((button) => { button.hidden = false; });
+    renderDocuments();
+  } catch (error) {
+    els.submittalStatusMessage.textContent = `The package could not be created: ${error.message}`;
+  } finally {
+    submit.disabled = false;
+  }
+}
+
+function activeDraftSubmittal() {
+  return state.submittals.find((item) => item.id === state.submittalDraft.recordId);
+}
+
+function downloadSubmittalRecord(record = activeDraftSubmittal()) {
+  if (record) openSubmittalFile(record);
+}
+
+function prepareSubmittalEmail() {
+  const record = activeDraftSubmittal();
+  if (!record) return;
+  downloadSubmittalRecord(record);
+  const url = `mailto:${encodeURIComponent(record.recipients)}?cc=${encodeURIComponent(record.cc)}&subject=${encodeURIComponent(record.emailSubject)}&body=${encodeURIComponent(`${record.emailBody}\n\nThe submittal package has been downloaded. Please attach ${record.fileName} to this message.`)}`;
+  window.location.href = url;
+  els.submittalStatusMessage.textContent = "Your email draft was opened and the package was downloaded. Attach the PDF, send it, then select Mark Sent.";
+}
+
+function markSubmittalSent() {
+  if (!requireSharedEditing()) return;
+  const record = activeDraftSubmittal();
+  if (!record || !confirm("Confirm that this submittal was sent to the listed recipients?")) return;
+  record.status = "Sent";
+  record.sentAt = new Date().toISOString();
+  record.updatedAt = record.sentAt;
+  record.sentBy = actorLabel();
+  record.rowKeys.forEach((key) => {
+    const row = state.rows.find((item) => rowKey(item) === key);
+    if (!row) return;
+    saveCellEdit(row, FIELD.submittal, record.number);
+    saveCellEdit(row, FIELD.dateSubmitted, excelSerialFromDate(record.sentAt.slice(0, 10)));
+    saveCellEdit(row, FIELD.status, "Submitted");
+    const files = submittalFiles(row[FIELD.submittalFiles]);
+    if (!files.some((file) => file.path === record.path)) {
+      saveCellEdit(row, FIELD.submittalFiles, [...files, { name: record.fileName, path: record.path, size: 0, uploadedAt: record.sentAt, uploadedBy: record.sentBy }]);
+    }
+  });
+  if (!state.adminLists.statuses.some((value) => normalizeKey(value) === "SUBMITTED")) {
+    state.adminLists.statuses.push("Submitted");
+  }
+  queueSharedSave();
+  els.submittalStatusMessage.textContent = `Sent ${new Date(record.sentAt).toLocaleString()} and logged to ${record.rowKeys.length} material item(s).`;
+  els.submittalMarkSent.hidden = true;
+  state.filtered = state.rows.filter(matchesFilters);
+  render();
+}
+
+function renderDocuments() {
+  if (!els.templateList) return;
+  const selectedProjectId = clean(els.documentProject.value) || state.activeProjectId;
+  els.documentProject.innerHTML = state.projects.map((project) => `<option value="${escapeHtml(project.id)}" ${project.id === selectedProjectId ? "selected" : ""}>${escapeHtml(project.name)}${project.archived ? " (Archived)" : ""}</option>`).join("");
+  els.projectTemplate.innerHTML = `<option value="">No form assigned</option>${state.documentTemplates.map((template) => `<option value="${escapeHtml(template.id)}">${escapeHtml(template.name)}</option>`).join("")}`;
+  fillProjectTemplateForm();
+  els.templateCount.textContent = `${state.documentTemplates.length} form${state.documentTemplates.length === 1 ? "" : "s"}`;
+  els.templateList.innerHTML = state.documentTemplates.map((template) => `<div class="admin-list-row"><div><strong>${escapeHtml(template.name)}</strong><small>${escapeHtml(template.fileName)} · ${escapeHtml(fileSizeLabel(template.size))}</small></div><div class="admin-row-actions"><button class="ghost-button" type="button" data-open-template="${escapeHtml(template.id)}">Open</button><button class="icon-row-button danger" type="button" data-remove-template="${escapeHtml(template.id)}" aria-label="Remove ${escapeHtml(template.name)}">×</button></div></div>`).join("") || `<p class="empty">No submittal forms uploaded yet.</p>`;
+  const project = selectedDocumentProject();
+  const records = state.submittals.filter((item) => item.projectId === project?.id);
+  els.submittalLogCount.textContent = `${records.length} submittal${records.length === 1 ? "" : "s"}`;
+  els.submittalLogHead.innerHTML = `<tr><th>Submittal #</th><th>Description</th><th>Specification</th><th>Status</th><th>Created</th><th>Sent</th><th>Recipients</th><th>Package</th></tr>`;
+  els.submittalLogBody.innerHTML = records.map((record) => `<tr><td>${escapeHtml(record.number)}</td><td>${escapeHtml(record.description)}</td><td>${escapeHtml(record.specificationSection)}</td><td>${escapeHtml(record.status)}</td><td>${escapeHtml(record.createdAt ? new Date(record.createdAt).toLocaleDateString() : "")}</td><td>${escapeHtml(record.sentAt ? new Date(record.sentAt).toLocaleString() : "")}</td><td>${escapeHtml(record.recipients)}</td><td><button class="ghost-button" type="button" data-open-submittal="${escapeHtml(record.id)}">Open PDF</button></td></tr>`).join("") || `<tr><td colspan="8" class="empty">No submittals have been created for this project.</td></tr>`;
+  els.templateList.querySelectorAll("[data-open-template]").forEach((button) => button.addEventListener("click", () => openSubmittalFile(state.documentTemplates.find((item) => item.id === button.dataset.openTemplate))));
+  els.templateList.querySelectorAll("[data-remove-template]").forEach((button) => button.addEventListener("click", () => removeDocumentTemplate(button.dataset.removeTemplate)));
+  els.submittalLogBody.querySelectorAll("[data-open-submittal]").forEach((button) => button.addEventListener("click", () => downloadSubmittalRecord(state.submittals.find((item) => item.id === button.dataset.openSubmittal))));
+  updateSharedEditingControls();
+}
+
 function render() {
   renderDashboard();
   renderLog();
@@ -5295,6 +5719,7 @@ function render() {
   renderProviderReport();
   renderDevelopmentNotes();
   renderAdmin();
+  renderDocuments();
   renderAlerts();
   updateSharedEditingControls();
 }
@@ -5325,6 +5750,7 @@ function setView(view) {
     log: "Material Log",
     procurement: "Procurement",
     reports: "Reports",
+    documents: "Documents",
     import: "Import Log",
     development: "Development Notes",
     admin: "Admin",
@@ -5338,7 +5764,7 @@ function setView(view) {
   if (els.tableScrollTop) {
     els.tableScrollTop.style.display = showColumnControls ? "block" : "none";
   }
-  document.querySelector(".filters").style.display = ["admin", "development", "reports", "import"].includes(view) ? "none" : "grid";
+  document.querySelector(".filters").style.display = ["admin", "development", "reports", "documents", "import"].includes(view) ? "none" : "grid";
   if (!showColumnControls) {
     els.columnMenu.hidden = true;
     els.columnToggle.setAttribute("aria-expanded", "false");
@@ -5456,6 +5882,8 @@ async function init() {
 
   els.bulkAddNote.addEventListener("click", openBulkNoteDialog);
 
+  els.createSubmittal.addEventListener("click", openCreateSubmittal);
+
   els.bulkClear.addEventListener("click", clearBulkSelection);
 
   els.exportExcel.addEventListener("click", exportMaterialLog);
@@ -5538,6 +5966,16 @@ async function init() {
   });
   els.bulkNoteCancel.addEventListener("click", closeBulkNoteDialog);
   els.bulkNoteClose.addEventListener("click", closeBulkNoteDialog);
+
+  els.templateUploadForm.addEventListener("submit", uploadDocumentTemplate);
+  els.documentProject.addEventListener("change", renderDocuments);
+  els.projectTemplateForm.addEventListener("submit", saveProjectTemplateSetup);
+  els.submittalForm.addEventListener("submit", generateSubmittal);
+  els.submittalCancel.addEventListener("click", closeSubmittalDialog);
+  els.submittalClose.addEventListener("click", closeSubmittalDialog);
+  els.submittalDownload.addEventListener("click", () => downloadSubmittalRecord());
+  els.submittalPrepareEmail.addEventListener("click", prepareSubmittalEmail);
+  els.submittalMarkSent.addEventListener("click", markSubmittalSent);
 
   els.developmentNoteForm.addEventListener("submit", (event) => {
     event.preventDefault();
