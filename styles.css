@@ -1744,6 +1744,79 @@ dd {
   font-weight: 700;
 }
 
+.submittal-attachment-section {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #d5dedb;
+  border-radius: 6px;
+  padding: 12px;
+  background: #f7f9f8;
+}
+
+.submittal-attachment-section h4,
+.submittal-attachment-section p {
+  margin: 0;
+}
+
+.field-help {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.submittal-attachment-list {
+  display: grid;
+  gap: 6px;
+}
+
+.submittal-attachment-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 52px;
+  border: 1px solid #d5dedb;
+  border-radius: 5px;
+  padding: 8px;
+  background: #fff;
+}
+
+.attachment-order {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #e5efeb;
+  color: #185c4b;
+  font-weight: 800;
+}
+
+.attachment-name {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.attachment-name strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-name small {
+  color: var(--muted);
+}
+
+.attachment-actions {
+  display: flex;
+  gap: 5px;
+}
+
+.attachment-actions .icon-row-button:disabled {
+  cursor: default;
+  opacity: 0.3;
+}
+
 @media (max-width: 1080px) {
   .app-shell {
     grid-template-columns: 1fr;

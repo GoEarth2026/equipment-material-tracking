@@ -465,7 +465,15 @@
           <label>Contractor Date<input id="submittalContractorDate" type="date" /></label>
           <label>Manufacturer By<input id="submittalManufacturerBy" type="text" /></label>
           <label>Manufacturer Date<input id="submittalManufacturerDate" type="date" /></label>
-          <label class="wide-field">Additional Product Data PDFs<input id="submittalProductFiles" type="file" accept="application/pdf,.pdf" multiple /></label>
+          <label class="wide-field">Add Product Data PDFs<input id="submittalProductFiles" type="file" accept="application/pdf,.pdf" multiple /></label>
+          <section class="submittal-attachment-section wide-field" aria-labelledby="submittalAttachmentHeading">
+            <div class="section-heading">
+              <h4 id="submittalAttachmentHeading">Package Attachments</h4>
+              <span id="submittalAttachmentCount">0 files</span>
+            </div>
+            <p class="field-help">Files will be added to the package in the order shown.</p>
+            <div class="submittal-attachment-list" id="submittalAttachmentList"></div>
+          </section>
           <label class="wide-field">To<input id="submittalRecipients" type="text" placeholder="engineer@example.com, reviewer@example.com" /></label>
           <label class="wide-field">CC<input id="submittalCc" type="text" /></label>
           <label class="wide-field">Email Subject<input id="submittalEmailSubject" type="text" /></label>
@@ -502,6 +510,6 @@
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
     <script src="./supabase-config.js"></script>
-    <script src="./app.js?v=submittal-workflow3"></script>
+    <script src="./app.js?v=submittal-attachments1"></script>
   </body>
 </html>

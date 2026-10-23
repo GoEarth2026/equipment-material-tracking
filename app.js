@@ -286,6 +286,8 @@ const els = {
   submittalManufacturerBy: document.querySelector("#submittalManufacturerBy"),
   submittalManufacturerDate: document.querySelector("#submittalManufacturerDate"),
   submittalProductFiles: document.querySelector("#submittalProductFiles"),
+  submittalAttachmentList: document.querySelector("#submittalAttachmentList"),
+  submittalAttachmentCount: document.querySelector("#submittalAttachmentCount"),
   submittalRecipients: document.querySelector("#submittalRecipients"),
   submittalCc: document.querySelector("#submittalCc"),
   submittalEmailSubject: document.querySelector("#submittalEmailSubject"),
@@ -5533,6 +5535,70 @@ function nextSubmittalNumber(projectId) {
   return String(count).padStart(3, "0");
 }
 
+function initialSubmittalAttachments(rows) {
+  const seenPaths = new Set();
+  return rows.flatMap((row) => submittalFiles(row[FIELD.submittalFiles]))
+    .filter((file) => clean(file.name).toLowerCase().endsWith(".pdf") && clean(file.path))
+    .filter((file) => {
+      if (seenPaths.has(file.path)) return false;
+      seenPaths.add(file.path);
+      return true;
+    })
+    .map((file) => ({
+      id: storageRecordId("attachment"),
+      name: clean(file.name) || "Product data.pdf",
+      size: Number(file.size) || 0,
+      source: "storage",
+      path: file.path,
+    }));
+}
+
+function renderSubmittalAttachments() {
+  if (!els.submittalAttachmentList) return;
+  const attachments = state.submittalDraft.attachments || [];
+  els.submittalAttachmentCount.textContent = `${attachments.length} file${attachments.length === 1 ? "" : "s"}`;
+  els.submittalAttachmentList.innerHTML = attachments.map((attachment, index) => `
+    <div class="submittal-attachment-row">
+      <span class="attachment-order">${index + 1}</span>
+      <div class="attachment-name"><strong>${escapeHtml(attachment.name)}</strong><small>${escapeHtml(fileSizeLabel(attachment.size))}${attachment.source === "storage" ? " · Material log attachment" : " · Newly selected"}</small></div>
+      <div class="attachment-actions">
+        <button class="icon-row-button" type="button" data-move-submittal-attachment="${escapeHtml(attachment.id)}" data-direction="up" aria-label="Move ${escapeHtml(attachment.name)} up" title="Move up" ${index === 0 ? "disabled" : ""}>↑</button>
+        <button class="icon-row-button" type="button" data-move-submittal-attachment="${escapeHtml(attachment.id)}" data-direction="down" aria-label="Move ${escapeHtml(attachment.name)} down" title="Move down" ${index === attachments.length - 1 ? "disabled" : ""}>↓</button>
+        <button class="icon-row-button danger" type="button" data-remove-submittal-attachment="${escapeHtml(attachment.id)}" aria-label="Remove ${escapeHtml(attachment.name)}" title="Remove">×</button>
+      </div>
+    </div>
+  `).join("") || `<p class="empty">No product data PDFs are attached yet.</p>`;
+}
+
+function addSubmittalAttachments(files) {
+  const pdfFiles = [...files].filter((file) => file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf"));
+  pdfFiles.forEach((file) => {
+    state.submittalDraft.attachments.push({
+      id: storageRecordId("attachment"),
+      name: file.name,
+      size: file.size,
+      source: "local",
+      file,
+    });
+  });
+  els.submittalProductFiles.value = "";
+  renderSubmittalAttachments();
+}
+
+function moveSubmittalAttachment(id, direction) {
+  const attachments = state.submittalDraft.attachments;
+  const index = attachments.findIndex((attachment) => attachment.id === id);
+  const nextIndex = index + (direction === "up" ? -1 : 1);
+  if (index < 0 || nextIndex < 0 || nextIndex >= attachments.length) return;
+  [attachments[index], attachments[nextIndex]] = [attachments[nextIndex], attachments[index]];
+  renderSubmittalAttachments();
+}
+
+function removeSubmittalAttachment(id) {
+  state.submittalDraft.attachments = state.submittalDraft.attachments.filter((attachment) => attachment.id !== id);
+  renderSubmittalAttachments();
+}
+
 function openCreateSubmittal() {
   if (!requireSharedEditing()) return;
   const rows = selectedBulkRows();
@@ -5540,7 +5606,7 @@ function openCreateSubmittal() {
   const template = state.documentTemplates.find((item) => item.id === project?.submittalTemplateId);
   if (!rows.length) return alert("Select at least one material log item first.");
   if (!template) return alert("An Admin must assign a submittal form to this project in Documents first.");
-  state.submittalDraft = { rowKeys: rows.map(rowKey), attachments: [], recordId: "" };
+  state.submittalDraft = { rowKeys: rows.map(rowKey), attachments: initialSubmittalAttachments(rows), recordId: "" };
   const specs = uniqueSorted(rows.map((row) => clean(row[FIELD.spec])).filter(Boolean));
   const providers = uniqueSorted(rows.map((row) => clean(row[FIELD.provider])).filter(Boolean));
   els.submittalDialogSummary.textContent = `${project.name} · ${rows.length} selected item${rows.length === 1 ? "" : "s"}`;
@@ -5561,6 +5627,7 @@ function openCreateSubmittal() {
   els.submittalManufacturerBy.value = "";
   els.submittalManufacturerDate.value = "";
   els.submittalProductFiles.value = "";
+  renderSubmittalAttachments();
   els.submittalRecipients.value = "";
   els.submittalCc.value = "";
   els.submittalEmailSubject.value = `${project.name} - Submittal ${els.submittalNumber.value}`;
@@ -5628,24 +5695,18 @@ async function buildSubmittalPackage() {
   setPdfCheck(form, "No Deviations", els.submittalDeviationType.value === "none");
   setPdfCheck(form, "Deviation List", els.submittalDeviationType.value === "list");
 
-  const rows = selectedBulkRows();
-  const existingFiles = rows.flatMap((row) => submittalFiles(row[FIELD.submittalFiles]))
-    .filter((file) => clean(file.name).toLowerCase().endsWith(".pdf") && clean(file.path));
-  const addedFiles = [...(els.submittalProductFiles.files || [])];
   const skippedFiles = [];
-  for (const file of existingFiles) {
+  for (const attachment of state.submittalDraft.attachments) {
     try {
-      const source = await PDFLib.PDFDocument.load(await signedStorageBytes(file.path, `Product data file "${file.name}"`));
+      const bytes = attachment.source === "storage"
+        ? await signedStorageBytes(attachment.path, `Product data file "${attachment.name}"`)
+        : await attachment.file.arrayBuffer();
+      const source = await PDFLib.PDFDocument.load(bytes);
       const pages = await pdf.copyPages(source, source.getPageIndices());
       pages.forEach((page) => pdf.addPage(page));
     } catch {
-      skippedFiles.push(clean(file.name) || "Unnamed product data file");
+      skippedFiles.push(clean(attachment.name) || "Unnamed product data file");
     }
-  }
-  for (const file of addedFiles) {
-    const source = await PDFLib.PDFDocument.load(await file.arrayBuffer());
-    const pages = await pdf.copyPages(source, source.getPageIndices());
-    pages.forEach((page) => pdf.addPage(page));
   }
   setPdfText(form, "Page", "1");
   setPdfText(form, "of", String(pdf.getPageCount()));
@@ -5708,6 +5769,13 @@ async function generateSubmittal(event) {
       cc: clean(els.submittalCc.value),
       emailSubject: clean(els.submittalEmailSubject.value),
       emailBody: clean(els.submittalEmailBody.value),
+      attachments: state.submittalDraft.attachments.map((attachment, index) => ({
+        name: attachment.name,
+        size: attachment.size,
+        source: attachment.source,
+        path: attachment.path || "",
+        order: index + 1,
+      })),
       status: "Draft",
       createdAt: new Date().toISOString(),
       createdBy: actorLabel(),
@@ -6051,6 +6119,18 @@ async function init() {
   els.documentProject.addEventListener("change", renderDocuments);
   els.projectTemplateForm.addEventListener("submit", saveProjectTemplateSetup);
   els.submittalForm.addEventListener("submit", generateSubmittal);
+  els.submittalProductFiles.addEventListener("change", () => {
+    addSubmittalAttachments(els.submittalProductFiles.files || []);
+  });
+  els.submittalAttachmentList.addEventListener("click", (event) => {
+    const moveButton = event.target.closest("[data-move-submittal-attachment]");
+    if (moveButton) {
+      moveSubmittalAttachment(moveButton.dataset.moveSubmittalAttachment, moveButton.dataset.direction);
+      return;
+    }
+    const removeButton = event.target.closest("[data-remove-submittal-attachment]");
+    if (removeButton) removeSubmittalAttachment(removeButton.dataset.removeSubmittalAttachment);
+  });
   els.submittalCancel.addEventListener("click", closeSubmittalDialog);
   els.submittalClose.addEventListener("click", closeSubmittalDialog);
   els.submittalDownload.addEventListener("click", () => downloadSubmittalRecord());
