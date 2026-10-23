@@ -5652,8 +5652,12 @@ async function signedStorageBytes(path, label = "PDF") {
   return response.arrayBuffer();
 }
 
-function setPdfText(form, name, value) {
-  try { form.getTextField(name).setText(clean(value)); } catch { /* Template may omit this optional field. */ }
+function setPdfText(form, name, value, fontSize = null) {
+  try {
+    const field = form.getTextField(name);
+    if (Number.isFinite(fontSize)) field.setFontSize(fontSize);
+    field.setText(clean(value));
+  } catch { /* Template may omit this optional field. */ }
 }
 
 function setPdfCheck(form, name, checked) {
@@ -5723,8 +5727,8 @@ async function buildSubmittalPackage() {
   setPdfText(form, "PRODUCT NAME / DESCRIPTION", els.submittalDescription.value);
   setPdfText(form, "REVISION # (3)", els.submittalProvider.value);
   setPdfText(form, "REVISION # (4)", els.submittalManufacturer.value);
-  setPdfText(form, "Text12", els.submittalIntendedUse.value);
-  setPdfText(form, "DEVIATIONS & CLARIFICATIONS", els.submittalDeviationType.value === "none" ? "None" : els.submittalDeviations.value);
+  setPdfText(form, "Text12", els.submittalIntendedUse.value, 10);
+  setPdfText(form, "DEVIATIONS & CLARIFICATIONS", els.submittalDeviationType.value === "none" ? "None" : els.submittalDeviations.value, 10);
   setPdfText(form, "Text14", els.submittalContractorBy.value);
   setPdfText(form, "Text15", settings.engineer);
   setPdfText(form, "Text16", settings.engineerAttention);
