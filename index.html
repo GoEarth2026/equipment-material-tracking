@@ -173,6 +173,7 @@
               <form class="project-template-form" id="projectTemplateForm">
                 <label>Project<select id="documentProjectSelect"></select></label>
                 <label>Assigned Form<select id="projectTemplateSelect"></select></label>
+                <label>Submittal Numbering<select id="submittalNumberingMethod"><option value="general">General Sequence (001)</option><option value="specification">Specification Section (15092-001)</option></select></label>
                 <label>Contractor<input id="submittalContractor" type="text" /></label>
                 <label>Contractor Project No.<input id="submittalContractorProject" type="text" /></label>
                 <label>Project Location<input id="submittalProjectLocation" type="text" /></label>
@@ -510,6 +511,6 @@
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
     <script src="./supabase-config.js"></script>
-    <script src="./app.js?v=submittal-fonts1"></script>
+    <script src="./app.js?v=submittal-numbering1"></script>
   </body>
 </html>

@@ -255,6 +255,7 @@ const els = {
   templateCount: document.querySelector("#templateCount"),
   documentProject: document.querySelector("#documentProjectSelect"),
   projectTemplate: document.querySelector("#projectTemplateSelect"),
+  submittalNumberingMethod: document.querySelector("#submittalNumberingMethod"),
   projectTemplateForm: document.querySelector("#projectTemplateForm"),
   submittalContractor: document.querySelector("#submittalContractor"),
   submittalContractorProject: document.querySelector("#submittalContractorProject"),
@@ -486,6 +487,7 @@ function normalizeProject(project) {
       engineerProjectNo: clean(project?.submittalSettings?.engineerProjectNo),
       engineerAttention: clean(project?.submittalSettings?.engineerAttention),
       engineerAddress: clean(project?.submittalSettings?.engineerAddress),
+      numberingMethod: project?.submittalSettings?.numberingMethod === "specification" ? "specification" : "general",
     },
   };
 }
@@ -799,7 +801,7 @@ function updateSharedEditingControls() {
   });
   if (els.bulkAddNote) els.bulkAddNote.disabled = disabled || state.selectedBulkRows.size === 0;
   if (els.createSubmittal) els.createSubmittal.disabled = disabled || state.selectedBulkRows.size === 0;
-  [els.templateName, els.templateFile, els.templateUploadForm?.querySelector("button"), els.projectTemplate,
+  [els.templateName, els.templateFile, els.templateUploadForm?.querySelector("button"), els.projectTemplate, els.submittalNumberingMethod,
     els.submittalContractor, els.submittalContractorProject, els.submittalEngineer, els.submittalEngineerProject,
     els.submittalProjectLocation, els.submittalEngineerAttention, els.submittalEngineerAddress,
     els.projectTemplateForm?.querySelector("button")].filter(Boolean).forEach((control) => {
@@ -5436,6 +5438,7 @@ function fillProjectTemplateForm() {
   if (!project) return;
   const settings = project.submittalSettings || {};
   els.projectTemplate.value = clean(project.submittalTemplateId);
+  els.submittalNumberingMethod.value = settings.numberingMethod === "specification" ? "specification" : "general";
   els.submittalContractor.value = clean(settings.contractor);
   els.submittalContractorProject.value = clean(settings.contractorProjectNo);
   els.submittalProjectLocation.value = clean(settings.projectLocation);
@@ -5517,6 +5520,7 @@ function saveProjectTemplateSetup(event) {
     engineerProjectNo: clean(els.submittalEngineerProject.value),
     engineerAttention: clean(els.submittalEngineerAttention.value),
     engineerAddress: clean(els.submittalEngineerAddress.value),
+    numberingMethod: els.submittalNumberingMethod.value === "specification" ? "specification" : "general",
   };
   saveProjects();
   queueSharedSave();
@@ -5530,9 +5534,51 @@ function submittalDisplayDate(value) {
   return Number.isNaN(date.getTime()) ? clean(value) : date.toLocaleDateString();
 }
 
-function nextSubmittalNumber(projectId) {
-  const count = state.submittals.filter((item) => item.projectId === projectId).length + 1;
+function specificationParts(value) {
+  const text = clean(value);
+  const match = text.match(/\b(?:\d{6}\.\d{2}|\d{5})\b/);
+  if (!match) return { number: "", title: text };
+  return {
+    number: match[0],
+    title: clean(text.slice((match.index || 0) + match[0].length).replace(/^[\s\-–—:]+/, "")),
+  };
+}
+
+function nextSubmittalNumber(project, specificationText = "") {
+  const settings = project?.submittalSettings || {};
+  if (settings.numberingMethod === "specification") {
+    const sectionNumber = specificationParts(specificationText).number;
+    if (!sectionNumber) return "";
+    const sectionCount = state.submittals.filter((item) => (
+      item.projectId === project.id
+      && (clean(item.specificationNumber) || specificationParts(item.specificationSection).number) === sectionNumber
+    )).length + 1;
+    return `${sectionNumber}-${String(sectionCount).padStart(3, "0")}`;
+  }
+  const count = state.submittals.filter((item) => item.projectId === project?.id).length + 1;
   return String(count).padStart(3, "0");
+}
+
+function updateAutomaticSubmittalNumber() {
+  const project = activeProject();
+  const usesSpecification = project?.submittalSettings?.numberingMethod === "specification";
+  const sectionNumber = specificationParts(els.submittalSpec.value).number;
+  els.submittalSpec.setCustomValidity(usesSpecification && !sectionNumber
+    ? "Enter a five-digit specification section or a six-digit section followed by a decimal and two digits."
+    : "");
+  if (usesSpecification) els.submittalNumber.value = nextSubmittalNumber(project, els.submittalSpec.value);
+}
+
+function submittalPackageFileName() {
+  const number = clean(els.submittalNumber.value) || "Unnumbered";
+  const parts = specificationParts(els.submittalSpec.value);
+  const description = clean(parts.title || els.submittalDescription.value.split(";")[0] || "Submittal");
+  const safeDescription = description
+    .replace(/[\\/:*?"<>|]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+  return `${number} ${safeDescription || "Submittal"} (Submitted).pdf`;
 }
 
 function initialSubmittalAttachments(rows) {
@@ -5612,9 +5658,10 @@ function openCreateSubmittal() {
   els.submittalDialogSummary.textContent = `${project.name} · ${rows.length} selected item${rows.length === 1 ? "" : "s"}`;
   els.submittalSelectedItems.innerHTML = rows.map((row) => `<div><strong>${escapeHtml(clean(row[FIELD.item]) || "Untitled item")}</strong><span>${escapeHtml(clean(row[FIELD.tag]))}</span></div>`).join("");
   els.submittalTemplateName.value = template.name;
-  els.submittalNumber.value = nextSubmittalNumber(project.id);
-  els.submittalRevision.value = "0";
   els.submittalSpec.value = specs.join(", ");
+  els.submittalNumber.value = nextSubmittalNumber(project, els.submittalSpec.value);
+  updateAutomaticSubmittalNumber();
+  els.submittalRevision.value = "0";
   els.submittalProvider.value = providers.join(", ");
   els.submittalManufacturer.value = providers.join(", ");
   els.submittalDescription.value = rows.map((row) => clean(row[FIELD.item])).filter(Boolean).join("; ");
@@ -5749,7 +5796,7 @@ async function generateSubmittal(event) {
   try {
     const { bytes, skippedFiles } = await buildSubmittalPackage();
     const id = storageRecordId("submittal");
-    const fileName = `${safeFileName(`Submittal ${clean(els.submittalNumber.value)} - ${activeProject().name}`)}.pdf`;
+    const fileName = submittalPackageFileName();
     const path = `packages/${activeProject().id}/${id}/${fileName}`;
     const { error } = await state.supabaseClient.storage.from(SUBMITTAL_FILE_BUCKET).upload(path, new Blob([bytes], { type: "application/pdf" }), {
       contentType: "application/pdf",
@@ -5763,6 +5810,7 @@ async function generateSubmittal(event) {
       number: clean(els.submittalNumber.value),
       revision: clean(els.submittalRevision.value),
       specificationSection: clean(els.submittalSpec.value),
+      specificationNumber: specificationParts(els.submittalSpec.value).number,
       provider: clean(els.submittalProvider.value),
       manufacturer: clean(els.submittalManufacturer.value),
       description: clean(els.submittalDescription.value),
@@ -6123,6 +6171,7 @@ async function init() {
   els.documentProject.addEventListener("change", renderDocuments);
   els.projectTemplateForm.addEventListener("submit", saveProjectTemplateSetup);
   els.submittalForm.addEventListener("submit", generateSubmittal);
+  els.submittalSpec.addEventListener("input", updateAutomaticSubmittalNumber);
   els.submittalProductFiles.addEventListener("change", () => {
     addSubmittalAttachments(els.submittalProductFiles.files || []);
   });
