@@ -1599,6 +1599,31 @@ tr:hover td {
   background: #fff6e9;
 }
 
+.submittal-parent-row {
+  cursor: pointer;
+}
+
+.submittal-parent-row:hover td,
+.submittal-parent-row:focus td {
+  background: #eef6f3;
+}
+
+.submittal-parent-row:focus {
+  outline: 2px solid #3f7f6c;
+  outline-offset: -2px;
+}
+
+.submittal-parent-link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #176b55;
+  font: inherit;
+  font-weight: 800;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .source-grid {
   display: grid;
   grid-template-columns: 1fr 2fr;

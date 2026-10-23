@@ -4578,6 +4578,42 @@ function openItemDetails(row) {
   if (!els.itemDetailsDialog.open) els.itemDetailsDialog.showModal();
 }
 
+function openSubmittalParentDetails(submittalId) {
+  const record = state.submittals.find((item) => item.id === submittalId);
+  const project = state.projects.find((item) => item.id === record?.projectId);
+  if (!record || !project) return;
+  const childKeySet = new Set(record.rowKeys || []);
+  const childRows = loadRowsForProject(project).filter((row) => childKeySet.has(rowKey(row)));
+  const specification = specificationParts(record.specificationSection);
+  const approvedSerials = childRows.map((row) => reportNumeric(row[FIELD.submittalReturnActual])).filter((value) => value !== null);
+  const approvedDate = approvedSerials.length ? excelDate(Math.max(...approvedSerials)) : "";
+  const submittedDate = record.sentAt
+    ? new Date(record.sentAt).toLocaleDateString()
+    : (childRows.map((row) => excelDate(row[FIELD.dateSubmitted])).find(Boolean) || "");
+  els.itemDetailsTitle.textContent = `Submittal ${clean(record.number) || "Details"}`;
+  els.itemDetailsSubtitle.textContent = `${project.name} · ${childRows.length} item${childRows.length === 1 ? "" : "s"}`;
+  els.itemDetailsContent.innerHTML = `
+    <section class="item-details-grid">
+      <div><span>Submittal Number</span><strong>${escapeHtml(record.number || "—")}</strong></div>
+      <div><span>Specification Section</span><strong>${escapeHtml(specification.number || "—")}</strong></div>
+      <div><span>Specification Description</span><strong>${escapeHtml(specification.title || record.description || "—")}</strong></div>
+      <div><span>Submitted Date</span><strong>${escapeHtml(submittedDate || "—")}</strong></div>
+      <div><span>Approved Date</span><strong>${escapeHtml(approvedDate || "—")}</strong></div>
+      <div><span>Status</span><strong>${escapeHtml(approvedDate ? "Approved" : record.status || "Draft")}</strong></div>
+    </section>
+    <section class="item-history">
+      <h4>Included Material Log Items</h4>
+      <div class="table-shell">
+        <table class="report-table">
+          <thead><tr><th>Tag #</th><th>Item Description</th><th>Provider</th><th>Category</th><th>Quantity</th><th>Units</th><th>Submittal Status</th></tr></thead>
+          <tbody>${childRows.map((row) => `<tr><td>${escapeHtml(row[FIELD.tag] || "")}</td><td>${escapeHtml(row[FIELD.item] || "")}</td><td>${escapeHtml(row[FIELD.provider] || "")}</td><td>${escapeHtml(row[FIELD.category] || "")}</td><td>${escapeHtml(row[FIELD.quantity] ?? "")}</td><td>${escapeHtml(row[FIELD.units] || "")}</td><td>${escapeHtml(row[FIELD.status] || "")}</td></tr>`).join("") || `<tr><td colspan="7" class="empty">No linked material items were found.</td></tr>`}</tbody>
+        </table>
+      </div>
+    </section>
+  `;
+  if (!els.itemDetailsDialog.open) els.itemDetailsDialog.showModal();
+}
+
 function restoreActivityValue(activityId) {
   if (!requireSharedEditing()) return;
   const entry = state.activityLog.find((item) => item.id === activityId);
@@ -4779,6 +4815,55 @@ function genericReportDefinition() {
   const projectLabel = selectedOptionLabel(els.reportProject);
   const providerLabel = selectedOptionLabel(els.reportProvider);
   const suffix = `${projectLabel} - ${providerLabel}`;
+
+  if (reportType === "submittal-log") {
+    const selectedProjects = selectedReportProjects();
+    const projectById = new Map(selectedProjects.map((project) => [project.id, project]));
+    const selectedProvider = clean(els.reportProvider.value || "all");
+    const rows = state.submittals
+      .filter((record) => projectById.has(record.projectId))
+      .map((record) => {
+        const project = projectById.get(record.projectId);
+        const projectRows = loadRowsForProject(project);
+        const childKeySet = new Set(record.rowKeys || []);
+        const childRows = projectRows.filter((row) => childKeySet.has(rowKey(row)));
+        const providers = uniqueSorted(childRows.map((row) => clean(row[FIELD.provider]) || "No provider"));
+        const approvedSerials = childRows.map((row) => reportNumeric(row[FIELD.submittalReturnActual])).filter((value) => value !== null);
+        const approvedDate = approvedSerials.length ? excelDate(Math.max(...approvedSerials)) : "";
+        const submittedDate = record.sentAt
+          ? new Date(record.sentAt).toLocaleDateString()
+          : (childRows.map((row) => excelDate(row[FIELD.dateSubmitted])).find(Boolean) || "");
+        const specification = specificationParts(record.specificationSection);
+        return {
+          submittalId: record.id,
+          providers,
+          createdAt: record.sentAt || record.createdAt || "",
+          cells: [
+            project.name,
+            clean(record.number),
+            specification.number,
+            specification.title || clean(record.description),
+            submittedDate,
+            approvedDate,
+            approvedDate ? "Approved" : clean(record.status) || "Draft",
+            childRows.length,
+          ],
+        };
+      })
+      .filter((line) => selectedProvider === "all" || line.providers.includes(selectedProvider))
+      .sort((a, b) => clean(b.createdAt).localeCompare(clean(a.createdAt)));
+    return {
+      title: `Submittal Log - ${suffix}`,
+      headers: ["Project", "Submittal #", "Specification Section", "Specification Description", "Submitted Date", "Approved Date", "Status", "Items"],
+      rows,
+      summaries: [
+        ["Submittals", rows.length],
+        ["Submitted", rows.filter((line) => clean(line.cells[4])).length],
+        ["Approved", rows.filter((line) => clean(line.cells[5])).length],
+        ["Awaiting Approval", rows.filter((line) => clean(line.cells[4]) && !clean(line.cells[5])).length],
+      ],
+    };
+  }
 
   if (reportType === "delivery-status") {
     const rows = items.map(({ project, row }) => {
@@ -4999,10 +5084,22 @@ function renderPoInvoiceReport() {
 
 function genericReportTableRows(definition) {
   return definition.rows.map((line) => `
-    <tr class="${escapeHtml(line.className || "")}">
-      ${line.cells.map((cell) => `<td>${escapeHtml(cell ?? "")}</td>`).join("")}
+    <tr class="${escapeHtml(line.className || "")} ${line.submittalId ? "submittal-parent-row" : ""}" ${line.submittalId ? `data-submittal-parent-id="${escapeHtml(line.submittalId)}" tabindex="0"` : ""}>
+      ${line.cells.map((cell, index) => `<td>${line.submittalId && index === 1 ? `<button class="submittal-parent-link" type="button">${escapeHtml(cell ?? "")}</button>` : escapeHtml(cell ?? "")}</td>`).join("")}
     </tr>
   `).join("");
+}
+
+function bindSubmittalReportParents() {
+  els.providerReportBody.querySelectorAll("[data-submittal-parent-id]").forEach((row) => {
+    const open = () => openSubmittalParentDetails(row.dataset.submittalParentId);
+    row.addEventListener("click", open);
+    row.addEventListener("keydown", (event) => {
+      if (!["Enter", " "].includes(event.key)) return;
+      event.preventDefault();
+      open();
+    });
+  });
 }
 
 function renderGenericReport() {
@@ -5013,6 +5110,7 @@ function renderGenericReport() {
   els.providerReportHead.innerHTML = `<tr>${definition.headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr>`;
   els.providerReportBody.innerHTML = genericReportTableRows(definition)
     || `<tr><td colspan="${definition.headers.length}" class="empty">No items match this report.</td></tr>`;
+  bindSubmittalReportParents();
 }
 
 function renderProviderReport() {
