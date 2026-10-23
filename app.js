@@ -5546,17 +5546,26 @@ function specificationParts(value) {
 
 function nextSubmittalNumber(project, specificationText = "") {
   const settings = project?.submittalSettings || {};
+  const projectSubmittals = state.submittals.filter((item) => item.projectId === project?.id);
   if (settings.numberingMethod === "specification") {
     const sectionNumber = specificationParts(specificationText).number;
     if (!sectionNumber) return "";
-    const sectionCount = state.submittals.filter((item) => (
-      item.projectId === project.id
-      && (clean(item.specificationNumber) || specificationParts(item.specificationSection).number) === sectionNumber
-    )).length + 1;
-    return `${sectionNumber}-${String(sectionCount).padStart(3, "0")}`;
+    const sectionSubmittals = projectSubmittals.filter((item) => (
+      (clean(item.specificationNumber) || specificationParts(item.specificationSection).number) === sectionNumber
+    ));
+    const highestSequence = sectionSubmittals.reduce((highest, item) => {
+      const number = clean(item.number);
+      const suffix = number.startsWith(`${sectionNumber}-`) ? number.slice(sectionNumber.length + 1) : "";
+      return /^\d+$/.test(suffix) ? Math.max(highest, Number(suffix)) : highest;
+    }, 0);
+    const nextSequence = Math.max(highestSequence, sectionSubmittals.length) + 1;
+    return `${sectionNumber}-${String(nextSequence).padStart(3, "0")}`;
   }
-  const count = state.submittals.filter((item) => item.projectId === project?.id).length + 1;
-  return String(count).padStart(3, "0");
+  const highestSequence = projectSubmittals.reduce((highest, item) => {
+    const number = clean(item.number);
+    return /^\d+$/.test(number) ? Math.max(highest, Number(number)) : highest;
+  }, 0);
+  return String(Math.max(highestSequence, projectSubmittals.length) + 1).padStart(3, "0");
 }
 
 function updateAutomaticSubmittalNumber() {
@@ -5579,6 +5588,22 @@ function submittalPackageFileName() {
     .trim()
     .slice(0, 120);
   return `${number} ${safeDescription || "Submittal"} (Submitted).pdf`;
+}
+
+async function refreshSharedSubmittals(required = false) {
+  if (!state.supabaseClient) return;
+  const { data, error } = await state.supabaseClient
+    .from("equipment_material_app_state")
+    .select("data")
+    .eq("id", "main")
+    .maybeSingle();
+  if (error) {
+    if (required) throw new Error(`The shared submittal sequence could not be verified: ${error.message}`);
+    return;
+  }
+  const remoteSubmittals = Array.isArray(data?.data?.submittals) ? data.data.submittals : [];
+  state.submittals = mergeRecordsById(state.submittals, remoteSubmittals)
+    .sort((a, b) => clean(b.createdAt).localeCompare(clean(a.createdAt)));
 }
 
 function initialSubmittalAttachments(rows) {
@@ -5645,13 +5670,14 @@ function removeSubmittalAttachment(id) {
   renderSubmittalAttachments();
 }
 
-function openCreateSubmittal() {
+async function openCreateSubmittal() {
   if (!requireSharedEditing()) return;
   const rows = selectedBulkRows();
   const project = activeProject();
   const template = state.documentTemplates.find((item) => item.id === project?.submittalTemplateId);
   if (!rows.length) return alert("Select at least one material log item first.");
   if (!template) return alert("An Admin must assign a submittal form to this project in Documents first.");
+  await refreshSharedSubmittals(false);
   state.submittalDraft = { rowKeys: rows.map(rowKey), attachments: initialSubmittalAttachments(rows), recordId: "" };
   const specs = uniqueSorted(rows.map((row) => clean(row[FIELD.spec])).filter(Boolean));
   const providers = uniqueSorted(rows.map((row) => clean(row[FIELD.provider])).filter(Boolean));
@@ -5789,6 +5815,13 @@ async function buildSubmittalPackage() {
 async function generateSubmittal(event) {
   event.preventDefault();
   if (!requireSharedEditing()) return;
+  try {
+    await refreshSharedSubmittals(true);
+    updateAutomaticSubmittalNumber();
+  } catch (error) {
+    els.submittalStatusMessage.textContent = error.message;
+    return;
+  }
   if (!els.submittalForm.reportValidity()) return;
   const submit = els.submittalForm.querySelector("button[type='submit']");
   submit.disabled = true;
