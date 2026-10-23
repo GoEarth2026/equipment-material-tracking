@@ -5551,16 +5551,11 @@ function nextSubmittalNumber(project, specificationText = "", method = project?.
   if (method === "specification") {
     const sectionNumber = specificationParts(specificationText).number;
     if (!sectionNumber) return "";
-    const sectionSubmittals = projectSubmittals.filter((item) => (
-      (clean(item.specificationNumber) || specificationParts(item.specificationSection).number) === sectionNumber
-    ));
-    const highestSequence = sectionSubmittals.reduce((highest, item) => {
-      const number = clean(item.number);
-      const suffix = number.startsWith(`${sectionNumber}-`) ? number.slice(sectionNumber.length + 1) : "";
-      return /^\d+$/.test(suffix) ? Math.max(highest, Number(suffix)) : highest;
-    }, 0);
-    const nextSequence = Math.max(highestSequence, sectionSubmittals.length) + 1;
-    return `${sectionNumber}-${String(nextSequence).padStart(3, "0")}`;
+    const selectedKeys = new Set(state.submittalDraft.rowKeys || []);
+    const sectionRows = state.rows.filter((row) => specificationParts(row[FIELD.spec]).number === sectionNumber);
+    const selectedPosition = sectionRows.findIndex((row) => selectedKeys.has(rowKey(row)));
+    const sequence = selectedPosition >= 0 ? selectedPosition + 1 : 1;
+    return `${sectionNumber}-${String(sequence).padStart(3, "0")}`;
   }
   const highestSequence = projectSubmittals.reduce((highest, item) => {
     const number = clean(item.number);
