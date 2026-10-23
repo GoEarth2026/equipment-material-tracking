@@ -5807,7 +5807,7 @@ async function buildSubmittalPackage() {
   setPdfText(form, "ENGINEER’S PROJECT # (1)", settings.engineerProjectNo);
   setPdfText(form, "Text3", project.name);
   setPdfText(form, "PROJECT LOCATION", settings.projectLocation);
-  setPdfText(form, "REVISION #", formNumber.sectionNumber);
+  setPdfText(form, "REVISION #", els.submittalSpec.value);
   setPdfText(form, "REVISION # (1)", formNumber.fullNumber);
   setPdfText(form, "Text20", els.submittalRevision.value);
   setPdfText(form, "PRODUCT NAME / DESCRIPTION", els.submittalDescription.value);
