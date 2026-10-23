@@ -55,6 +55,7 @@ const state = {
   columnWidths: {},
   selectedBulkRows: new Set(),
   selectedBulkColumns: new Set(),
+  expandedSubmittalParents: new Set(),
   deletedRowsByProject: {},
   logColumnFilters: {},
   logSort: { column: null, direction: "asc" },
@@ -4297,15 +4298,83 @@ function renderDeliveriesCell(row, header = FIELD.deliveries) {
   `;
 }
 
+function groupedLogEntries(rows) {
+  const groups = new Map();
+  rows.forEach((row) => {
+    const number = clean(row[FIELD.submittal]);
+    if (!number) return;
+    const key = normalizeKey(number);
+    if (!groups.has(key)) groups.set(key, { key, number, rows: [] });
+    groups.get(key).rows.push(row);
+  });
+  const renderedGroups = new Set();
+  const entries = [];
+  rows.forEach((row) => {
+    const number = clean(row[FIELD.submittal]);
+    if (!number) {
+      entries.push({ type: "row", row, parentId: "" });
+      return;
+    }
+    const key = normalizeKey(number);
+    if (renderedGroups.has(key)) return;
+    renderedGroups.add(key);
+    const group = groups.get(key);
+    const parentId = `${state.activeProjectId}|${key}`;
+    entries.push({ type: "parent", parentId, ...group });
+    if (state.expandedSubmittalParents.has(parentId)) {
+      group.rows.forEach((child) => entries.push({ type: "row", row: child, parentId }));
+    }
+  });
+  return entries;
+}
+
+function submittalParentCell(group, header) {
+  const specificationValue = group.rows.map((row) => clean(row[FIELD.spec])).find(Boolean) || "";
+  const specification = specificationParts(specificationValue);
+  const submitted = group.rows.map((row) => reportNumeric(row[FIELD.dateSubmitted])).filter((value) => value !== null);
+  const approved = group.rows.map((row) => reportNumeric(row[FIELD.submittalReturnActual])).filter((value) => value !== null);
+  if (header === FIELD.item) return `Submittal ${group.number}${specification.title ? ` - ${specification.title}` : ""}`;
+  if (header === FIELD.spec) return specificationValue;
+  if (header === FIELD.submittal) return group.number;
+  if (header === FIELD.dateSubmitted) return submitted.length ? excelDate(Math.max(...submitted)) : "";
+  if (header === FIELD.submittalReturnActual) return approved.length ? excelDate(Math.max(...approved)) : "";
+  if (header === FIELD.status) return approved.length ? "Approved" : (group.rows.map((row) => clean(row[FIELD.status])).find(Boolean) || "Submitted");
+  return "";
+}
+
+function submittalParentDetailId(group) {
+  return submittalParentRecordsForProject(activeProject())
+    .find((record) => normalizeKey(record.number) === group.key)?.id || "";
+}
+
+function renderSubmittalParentRow(group, headers) {
+  const expanded = state.expandedSubmittalParents.has(group.parentId);
+  const detailId = submittalParentDetailId(group);
+  return `
+    <tr class="submittal-log-parent-row" data-submittal-group="${escapeHtml(group.parentId)}">
+      <td class="action-cell submittal-parent-actions" style="width: ${ACTION_COLUMN_WIDTH}px; min-width: ${ACTION_COLUMN_WIDTH}px; max-width: ${ACTION_COLUMN_WIDTH}px;">
+        <button class="icon-row-button submittal-expand-button" type="button" data-toggle-submittal-group="${escapeHtml(group.parentId)}" aria-expanded="${expanded}" aria-label="${expanded ? "Collapse" : "Expand"} submittal ${escapeHtml(group.number)}" title="${expanded ? "Collapse" : "Expand"}">${expanded ? "-" : "+"}</button>
+        ${detailId ? `<button class="icon-row-button view-row-button" type="button" data-view-submittal-parent="${escapeHtml(detailId)}" aria-label="View submittal details" title="View submittal details">i</button>` : ""}
+        <span class="submittal-child-count">${group.rows.length} item${group.rows.length === 1 ? "" : "s"}</span>
+      </td>
+      ${headers.map((header) => `<td class="submittal-parent-cell" data-cell-column="${escapeHtml(header)}" style="${columnStyle(header)}">${escapeHtml(submittalParentCell(group, header))}</td>`).join("")}
+    </tr>
+  `;
+}
+
 function renderLogBody() {
   const headers = visibleLogHeaders();
   const rows = getLogRows();
+  const entries = groupedLogEntries(rows);
   const editingEnabled = canEditSharedData();
   const disabled = editingEnabled ? "" : "disabled";
   const editableAttribute = editingEnabled ? "true" : "false";
   const editableTabIndex = editingEnabled ? "0" : "-1";
-  els.logBody.innerHTML = rows.map((row) => `
-    <tr data-row-key="${escapeHtml(rowKey(row))}">
+  els.logBody.innerHTML = entries.map((entry) => {
+    if (entry.type === "parent") return renderSubmittalParentRow(entry, headers);
+    const row = entry.row;
+    return `
+    <tr class="${entry.parentId ? "submittal-log-child-row" : ""}" data-row-key="${escapeHtml(rowKey(row))}">
       <td class="action-cell" style="width: ${ACTION_COLUMN_WIDTH}px; min-width: ${ACTION_COLUMN_WIDTH}px; max-width: ${ACTION_COLUMN_WIDTH}px;">
         <label class="bulk-row-select" title="Select row for bulk edit">
           <input type="checkbox" data-bulk-row="${escapeHtml(rowKey(row))}" aria-label="Select row for bulk edit" ${state.selectedBulkRows.has(rowKey(row)) ? "checked" : ""} ${disabled} />
@@ -4358,7 +4427,8 @@ function renderLogBody() {
         return `<td class="editable-cell ${dateConflict(row, header) ? "date-conflict" : ""}" contenteditable="${editableAttribute}" tabindex="${editableTabIndex}" aria-readonly="${editingEnabled ? "false" : "true"}" data-cell-column="${escapeHtml(header)}" style="${columnStyle(header)}" data-edit-row="${escapeHtml(key)}" data-edit-column="${escapeHtml(header)}" data-log-field-row="${escapeHtml(key)}" data-log-field-column="${escapeHtml(header)}">${escapeHtml(editableValue(row, header))}</td>`;
       }).join("")}
     </tr>
-  `).join("");
+  `;
+  }).join("");
   bindEditableCells();
   bindLogFieldTabbing();
   bindProviderInputs();
@@ -4371,6 +4441,7 @@ function renderLogBody() {
   bindInsertButtons();
   bindRemoveButtons();
   bindItemDetailButtons();
+  bindSubmittalGroupButtons();
   bindBulkRowSelection();
   renderBulkEditPanel();
   updateSharedEditingControls();
@@ -4389,6 +4460,23 @@ function bindBulkRowSelection() {
       renderBulkEditPanel();
       renderLogHead();
     });
+  });
+}
+
+function bindSubmittalGroupButtons() {
+  els.logBody.querySelectorAll("[data-toggle-submittal-group]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const parentId = button.dataset.toggleSubmittalGroup;
+      if (state.expandedSubmittalParents.has(parentId)) {
+        state.expandedSubmittalParents.delete(parentId);
+      } else {
+        state.expandedSubmittalParents.add(parentId);
+      }
+      renderLogBody();
+    });
+  });
+  els.logBody.querySelectorAll("[data-view-submittal-parent]").forEach((button) => {
+    button.addEventListener("click", () => openSubmittalParentDetails(button.dataset.viewSubmittalParent));
   });
 }
 

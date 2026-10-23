@@ -1624,6 +1624,37 @@ tr:hover td {
   cursor: pointer;
 }
 
+.submittal-log-parent-row td {
+  border-top: 2px solid #8daf9f;
+  border-bottom: 1px solid #b9cec5;
+  background: #e7f1ed;
+  font-weight: 800;
+}
+
+.submittal-log-parent-row:hover td {
+  background: #dcebe5;
+}
+
+.submittal-parent-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.submittal-child-count {
+  color: #4f675e;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.submittal-log-child-row td:first-child {
+  box-shadow: inset 4px 0 0 #8daf9f;
+}
+
+.submittal-log-child-row td[data-cell-column="ITEM DESCRIPTION"] {
+  padding-left: 22px;
+}
+
 .source-grid {
   display: grid;
   grid-template-columns: 1fr 2fr;
