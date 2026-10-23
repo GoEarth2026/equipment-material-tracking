@@ -1710,8 +1710,74 @@ dd {
 }
 
 .document-panel,
-.submittal-log-panel {
+.submittal-log-panel,
+.distribution-panel {
   padding: 18px;
+}
+
+.distribution-panel {
+  margin-bottom: 18px;
+}
+
+.distribution-contact-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 14px 0 18px;
+}
+
+.distribution-contact-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.distribution-form-actions {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+}
+
+.distribution-contact-list {
+  display: grid;
+  gap: 6px;
+}
+
+.distribution-contact-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1fr) 48px auto;
+  gap: 14px;
+  align-items: center;
+  border-top: 1px solid #d7e0dd;
+  padding: 10px 0;
+}
+
+.distribution-contact-row > div:not(.admin-row-actions) {
+  display: grid;
+  gap: 3px;
+}
+
+.distribution-contact-row span,
+.distribution-contact-row a {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.distribution-contact-row a {
+  overflow-wrap: anywhere;
+}
+
+.distribution-recipient-badge {
+  justify-self: start;
+  border: 1px solid #91b8ac;
+  border-radius: 4px;
+  padding: 4px 7px;
+  background: #edf6f2;
+  color: #185c4b !important;
+  font-weight: 800;
 }
 
 .document-upload-form,
@@ -1899,7 +1965,12 @@ dd {
   .documents-layout,
   .document-upload-form,
   .project-template-form,
+  .distribution-contact-form,
   .submittal-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .distribution-contact-row {
     grid-template-columns: 1fr;
   }
 

@@ -185,6 +185,22 @@
               </form>
             </section>
           </div>
+          <section class="panel distribution-panel">
+            <div class="section-heading"><h3>Submittal Distribution List</h3><span id="distributionContactCount"></span></div>
+            <form class="distribution-contact-form" id="distributionContactForm">
+              <label>Name<input id="distributionContactName" type="text" required /></label>
+              <label>Team<select id="distributionContactTeam"><option value="Engineering">Engineering</option><option value="Construction Management">Construction Management</option><option value="Contractor">Contractor</option><option value="Other">Other</option></select></label>
+              <label>Company<input id="distributionContactCompany" type="text" /></label>
+              <label>Email<input id="distributionContactEmail" type="email" required /></label>
+              <label>Phone<input id="distributionContactPhone" type="tel" /></label>
+              <label>Email Field<select id="distributionContactRecipientType"><option value="to">To</option><option value="cc">CC</option></select></label>
+              <div class="distribution-form-actions">
+                <button class="ghost-button primary-action" id="distributionContactSubmit" type="submit">Add Contact</button>
+                <button class="ghost-button" id="distributionContactCancel" type="button" hidden>Cancel</button>
+              </div>
+            </form>
+            <div class="distribution-contact-list" id="distributionContactList"></div>
+          </section>
           <section class="panel submittal-log-panel">
             <div class="section-heading"><h3>Project Submittal Log</h3><span id="submittalLogCount"></span></div>
             <div class="table-shell"><table class="report-table"><thead id="submittalLogHead"></thead><tbody id="submittalLogBody"></tbody></table></div>
@@ -513,6 +529,6 @@
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
     <script src="./supabase-config.js"></script>
-    <script src="./app.js?v=material-log-submittal-groups1"></script>
+    <script src="./app.js?v=submittal-distribution1"></script>
   </body>
 </html>

@@ -71,6 +71,7 @@ const state = {
   deletedDocumentTemplateIds: [],
   submittals: [],
   submittalDraft: { rowKeys: [], attachments: [] },
+  editingDistributionContactId: "",
   developmentNotes: [],
   userInitials: "",
   selectedImportFile: null,
@@ -265,6 +266,17 @@ const els = {
   submittalEngineerProject: document.querySelector("#submittalEngineerProject"),
   submittalEngineerAttention: document.querySelector("#submittalEngineerAttention"),
   submittalEngineerAddress: document.querySelector("#submittalEngineerAddress"),
+  distributionContactForm: document.querySelector("#distributionContactForm"),
+  distributionContactName: document.querySelector("#distributionContactName"),
+  distributionContactTeam: document.querySelector("#distributionContactTeam"),
+  distributionContactCompany: document.querySelector("#distributionContactCompany"),
+  distributionContactEmail: document.querySelector("#distributionContactEmail"),
+  distributionContactPhone: document.querySelector("#distributionContactPhone"),
+  distributionContactRecipientType: document.querySelector("#distributionContactRecipientType"),
+  distributionContactSubmit: document.querySelector("#distributionContactSubmit"),
+  distributionContactCancel: document.querySelector("#distributionContactCancel"),
+  distributionContactList: document.querySelector("#distributionContactList"),
+  distributionContactCount: document.querySelector("#distributionContactCount"),
   submittalLogCount: document.querySelector("#submittalLogCount"),
   submittalLogHead: document.querySelector("#submittalLogHead"),
   submittalLogBody: document.querySelector("#submittalLogBody"),
@@ -490,6 +502,17 @@ function normalizeProject(project) {
       engineerAttention: clean(project?.submittalSettings?.engineerAttention),
       engineerAddress: clean(project?.submittalSettings?.engineerAddress),
       numberingMethod: project?.submittalSettings?.numberingMethod === "specification" ? "specification" : "general",
+      distributionList: Array.isArray(project?.submittalSettings?.distributionList)
+        ? project.submittalSettings.distributionList.map((contact) => ({
+          id: clean(contact?.id) || storageRecordId("contact"),
+          name: clean(contact?.name),
+          team: clean(contact?.team) || "Other",
+          company: clean(contact?.company),
+          email: clean(contact?.email),
+          phone: clean(contact?.phone),
+          recipientType: contact?.recipientType === "cc" ? "cc" : "to",
+        })).filter((contact) => contact.name || contact.email || contact.phone)
+        : [],
     },
   };
 }
@@ -807,18 +830,20 @@ function updateSharedEditingControls() {
   [els.templateName, els.templateFile, els.templateUploadForm?.querySelector("button"), els.projectTemplate, els.submittalNumberingMethod,
     els.submittalContractor, els.submittalContractorProject, els.submittalEngineer, els.submittalEngineerProject,
     els.submittalProjectLocation, els.submittalEngineerAttention, els.submittalEngineerAddress,
-    els.projectTemplateForm?.querySelector("button")].filter(Boolean).forEach((control) => {
+    els.projectTemplateForm?.querySelector("button"), els.distributionContactName, els.distributionContactTeam,
+    els.distributionContactCompany, els.distributionContactEmail, els.distributionContactPhone,
+    els.distributionContactRecipientType, els.distributionContactSubmit, els.distributionContactCancel].filter(Boolean).forEach((control) => {
     control.disabled = disabled || state.currentRole !== "admin";
   });
 
   document.querySelectorAll(
-    "[data-edit-column], [data-provider-row], [data-category-row], [data-status-row], [data-checkbox-row], [data-bulk-row], [data-bulk-select-visible], #bulkColumnList input, [data-attach-submittal-row], [data-remove-submittal-file-row], [data-add-delivery-row], [data-edit-delivery-row], [data-remove-delivery-row], [data-add-note-row], [data-edit-note-row], [data-insert-row], [data-remove-row], [data-remove-list], [data-rename-status], [data-rename-supplier], [data-rename-category], [data-archive-project], [data-restore-project]",
+    "[data-edit-column], [data-provider-row], [data-category-row], [data-status-row], [data-checkbox-row], [data-bulk-row], [data-bulk-select-visible], #bulkColumnList input, [data-attach-submittal-row], [data-remove-submittal-file-row], [data-add-delivery-row], [data-edit-delivery-row], [data-remove-delivery-row], [data-add-note-row], [data-edit-note-row], [data-insert-row], [data-remove-row], [data-remove-list], [data-rename-status], [data-rename-supplier], [data-rename-category], [data-archive-project], [data-restore-project], [data-edit-distribution-contact], [data-remove-distribution-contact]",
   ).forEach((control) => {
     if (control.matches("[data-edit-column]")) {
       control.contentEditable = disabled ? "false" : "true";
       control.tabIndex = disabled ? -1 : 0;
       control.setAttribute("aria-readonly", disabled ? "true" : "false");
-    } else if (control.matches("[data-rename-supplier], [data-rename-category]")) {
+    } else if (control.matches("[data-rename-supplier], [data-rename-category], [data-edit-distribution-contact], [data-remove-distribution-contact]")) {
       control.disabled = disabled || state.currentRole !== "admin";
     } else {
       control.disabled = disabled;
@@ -5745,6 +5770,7 @@ function saveProjectTemplateSetup(event) {
   if (!project) return;
   project.submittalTemplateId = clean(els.projectTemplate.value);
   project.submittalSettings = {
+    ...(project.submittalSettings || {}),
     contractor: clean(els.submittalContractor.value),
     contractorProjectNo: clean(els.submittalContractorProject.value),
     projectLocation: clean(els.submittalProjectLocation.value),
@@ -5943,8 +5969,9 @@ async function openCreateSubmittal() {
   els.submittalManufacturerDate.value = "";
   els.submittalProductFiles.value = "";
   renderSubmittalAttachments();
-  els.submittalRecipients.value = "";
-  els.submittalCc.value = "";
+  const distributionList = project.submittalSettings?.distributionList || [];
+  els.submittalRecipients.value = distributionList.filter((contact) => contact.recipientType !== "cc").map((contact) => contact.email).filter(Boolean).join(", ");
+  els.submittalCc.value = distributionList.filter((contact) => contact.recipientType === "cc").map((contact) => contact.email).filter(Boolean).join(", ");
   els.submittalEmailSubject.value = `${project.name} - Submittal ${els.submittalNumber.value}`;
   els.submittalEmailBody.value = `Please find attached Submittal ${els.submittalNumber.value} for ${project.name}.`;
   els.submittalStatusMessage.textContent = "";
@@ -6170,12 +6197,91 @@ function markSubmittalSent() {
   render();
 }
 
+function resetDistributionContactForm() {
+  state.editingDistributionContactId = "";
+  els.distributionContactForm.reset();
+  els.distributionContactTeam.value = "Engineering";
+  els.distributionContactRecipientType.value = "to";
+  els.distributionContactSubmit.textContent = "Add Contact";
+  els.distributionContactCancel.hidden = true;
+}
+
+function saveDistributionContact(event) {
+  event.preventDefault();
+  if (!requireAdminEditing("manage the submittal distribution list")) return;
+  if (!els.distributionContactForm.reportValidity()) return;
+  const project = selectedDocumentProject();
+  if (!project) return;
+  const contacts = [...(project.submittalSettings?.distributionList || [])];
+  const contact = {
+    id: state.editingDistributionContactId || storageRecordId("contact"),
+    name: clean(els.distributionContactName.value),
+    team: clean(els.distributionContactTeam.value) || "Other",
+    company: clean(els.distributionContactCompany.value),
+    email: clean(els.distributionContactEmail.value),
+    phone: clean(els.distributionContactPhone.value),
+    recipientType: els.distributionContactRecipientType.value === "cc" ? "cc" : "to",
+  };
+  if (contacts.some((item) => item.id !== contact.id && normalizeKey(item.email) === normalizeKey(contact.email))) {
+    alert("That email address is already in this project's distribution list.");
+    return;
+  }
+  const existingIndex = contacts.findIndex((item) => item.id === contact.id);
+  if (existingIndex >= 0) contacts[existingIndex] = contact; else contacts.push(contact);
+  project.submittalSettings = { ...(project.submittalSettings || {}), distributionList: contacts };
+  saveProjects();
+  resetDistributionContactForm();
+  renderDocuments();
+}
+
+function editDistributionContact(contactId) {
+  const contact = selectedDocumentProject()?.submittalSettings?.distributionList?.find((item) => item.id === contactId);
+  if (!contact) return;
+  state.editingDistributionContactId = contact.id;
+  els.distributionContactName.value = contact.name;
+  els.distributionContactTeam.value = contact.team;
+  els.distributionContactCompany.value = contact.company;
+  els.distributionContactEmail.value = contact.email;
+  els.distributionContactPhone.value = contact.phone;
+  els.distributionContactRecipientType.value = contact.recipientType;
+  els.distributionContactSubmit.textContent = "Save Contact";
+  els.distributionContactCancel.hidden = false;
+  els.distributionContactName.focus();
+}
+
+function removeDistributionContact(contactId) {
+  if (!requireAdminEditing("manage the submittal distribution list")) return;
+  const project = selectedDocumentProject();
+  const contact = project?.submittalSettings?.distributionList?.find((item) => item.id === contactId);
+  if (!project || !contact || !confirm(`Remove ${contact.name} from this project's submittal distribution list?`)) return;
+  project.submittalSettings.distributionList = project.submittalSettings.distributionList.filter((item) => item.id !== contactId);
+  saveProjects();
+  if (state.editingDistributionContactId === contactId) resetDistributionContactForm();
+  renderDocuments();
+}
+
+function renderDistributionContacts() {
+  const contacts = selectedDocumentProject()?.submittalSettings?.distributionList || [];
+  els.distributionContactCount.textContent = `${contacts.length} contact${contacts.length === 1 ? "" : "s"}`;
+  els.distributionContactList.innerHTML = contacts.map((contact) => `
+    <article class="distribution-contact-row">
+      <div><strong>${escapeHtml(contact.name)}</strong><span>${escapeHtml([contact.team, contact.company].filter(Boolean).join(" · "))}</span></div>
+      <div><a href="mailto:${escapeHtml(contact.email)}">${escapeHtml(contact.email)}</a><a href="tel:${escapeHtml(contact.phone)}">${escapeHtml(contact.phone)}</a></div>
+      <span class="distribution-recipient-badge">${contact.recipientType === "cc" ? "CC" : "TO"}</span>
+      <div class="admin-row-actions"><button class="ghost-button" type="button" data-edit-distribution-contact="${escapeHtml(contact.id)}">Edit</button><button class="icon-row-button danger" type="button" data-remove-distribution-contact="${escapeHtml(contact.id)}" aria-label="Remove ${escapeHtml(contact.name)}">×</button></div>
+    </article>
+  `).join("") || `<p class="empty">No contacts have been added for this project.</p>`;
+  els.distributionContactList.querySelectorAll("[data-edit-distribution-contact]").forEach((button) => button.addEventListener("click", () => editDistributionContact(button.dataset.editDistributionContact)));
+  els.distributionContactList.querySelectorAll("[data-remove-distribution-contact]").forEach((button) => button.addEventListener("click", () => removeDistributionContact(button.dataset.removeDistributionContact)));
+}
+
 function renderDocuments() {
   if (!els.templateList) return;
   const selectedProjectId = clean(els.documentProject.value) || state.activeProjectId;
   els.documentProject.innerHTML = state.projects.map((project) => `<option value="${escapeHtml(project.id)}" ${project.id === selectedProjectId ? "selected" : ""}>${escapeHtml(project.name)}${project.archived ? " (Archived)" : ""}</option>`).join("");
   els.projectTemplate.innerHTML = `<option value="">No form assigned</option>${state.documentTemplates.map((template) => `<option value="${escapeHtml(template.id)}">${escapeHtml(template.name)}</option>`).join("")}`;
   fillProjectTemplateForm();
+  renderDistributionContacts();
   els.templateCount.textContent = `${state.documentTemplates.length} form${state.documentTemplates.length === 1 ? "" : "s"}`;
   els.templateList.innerHTML = state.documentTemplates.map((template) => `<div class="admin-list-row"><div><strong>${escapeHtml(template.name)}</strong><small>${escapeHtml(template.fileName)} · ${escapeHtml(fileSizeLabel(template.size))}</small></div><div class="admin-row-actions"><button class="ghost-button" type="button" data-open-template="${escapeHtml(template.id)}">Open</button><button class="icon-row-button danger" type="button" data-remove-template="${escapeHtml(template.id)}" aria-label="Remove ${escapeHtml(template.name)}">×</button></div></div>`).join("") || `<p class="empty">No submittal forms uploaded yet.</p>`;
   const project = selectedDocumentProject();
@@ -6445,8 +6551,13 @@ async function init() {
   els.bulkNoteClose.addEventListener("click", closeBulkNoteDialog);
 
   els.templateUploadForm.addEventListener("submit", uploadDocumentTemplate);
-  els.documentProject.addEventListener("change", renderDocuments);
+  els.documentProject.addEventListener("change", () => {
+    resetDistributionContactForm();
+    renderDocuments();
+  });
   els.projectTemplateForm.addEventListener("submit", saveProjectTemplateSetup);
+  els.distributionContactForm.addEventListener("submit", saveDistributionContact);
+  els.distributionContactCancel.addEventListener("click", resetDistributionContactForm);
   els.submittalForm.addEventListener("submit", generateSubmittal);
   els.submittalSpec.addEventListener("input", updateAutomaticSubmittalNumber);
   els.submittalDialogNumberingMethod.addEventListener("change", updateAutomaticSubmittalNumber);
