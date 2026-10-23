@@ -97,7 +97,9 @@ const state = {
   },
 };
 
-const VALID_VIEWS = new Set(["dashboard", "log", "procurement", "reports", "documents", "import", "development", "admin"]);
+const VALID_VIEWS = new Set(["dashboard", "log", "procurement", "reports", "import", "development", "admin"]);
+const VALID_ADMIN_SECTIONS = new Set(["projects", "lists", "submittals", "access"]);
+const ADMIN_SECTION_PREF_KEY = "equipmentMaterialAdminSection";
 const ACTION_COLUMN_WIDTH = 148;
 const DEFAULT_COLUMN_WIDTH = 150;
 const DEFAULT_WIDE_COLUMN_WIDTHS = {
@@ -6315,7 +6317,26 @@ function setSidebarHidden(hidden) {
   requestAnimationFrame(syncTopScrollbarWidth);
 }
 
+function setAdminSection(section) {
+  if (!VALID_ADMIN_SECTIONS.has(section)) section = "projects";
+  document.querySelectorAll("[data-admin-section]").forEach((button) => {
+    const isActive = button.dataset.adminSection === section;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-selected", String(isActive));
+  });
+  document.querySelectorAll("[data-admin-pane]").forEach((pane) => {
+    const isActive = pane.dataset.adminPane === section;
+    pane.classList.toggle("is-active", isActive);
+    pane.hidden = !isActive;
+  });
+  localStorage.setItem(ADMIN_SECTION_PREF_KEY, section);
+}
+
 function setView(view) {
+  if (view === "documents") {
+    setAdminSection("submittals");
+    view = "admin";
+  }
   if (!VALID_VIEWS.has(view)) view = "dashboard";
   state.activeView = view;
   localStorage.setItem("equipmentMaterialActiveView", view);
@@ -6333,7 +6354,6 @@ function setView(view) {
     log: "Material Log",
     procurement: "Procurement",
     reports: "Reports",
-    documents: "Documents",
     import: "Import Log",
     development: "Development Notes",
     admin: "Admin",
@@ -6347,7 +6367,7 @@ function setView(view) {
   if (els.tableScrollTop) {
     els.tableScrollTop.style.display = showColumnControls ? "block" : "none";
   }
-  document.querySelector(".filters").style.display = ["admin", "development", "reports", "documents", "import"].includes(view) ? "none" : "grid";
+  document.querySelector(".filters").style.display = ["admin", "development", "reports", "import"].includes(view) ? "none" : "grid";
   if (!showColumnControls) {
     els.columnMenu.hidden = true;
     els.columnToggle.setAttribute("aria-expanded", "false");
@@ -6384,7 +6404,11 @@ async function init() {
   state.userInitials = clean(localStorage.getItem(INITIALS_PREF_KEY)).toUpperCase();
   loadSavedViews();
   state.filtered = state.rows;
-  const initialView = location.hash.slice(1) || localStorage.getItem("equipmentMaterialActiveView") || "dashboard";
+  const requestedView = location.hash.slice(1) || localStorage.getItem("equipmentMaterialActiveView") || "dashboard";
+  const initialView = requestedView === "documents" ? "admin" : requestedView;
+  const initialAdminSection = requestedView === "documents"
+    ? "submittals"
+    : localStorage.getItem(ADMIN_SECTION_PREF_KEY) || "projects";
   try {
     const savedHiddenColumns = JSON.parse(localStorage.getItem(COLUMN_PREF_KEY) || "[]");
     state.hiddenColumns = new Set(savedHiddenColumns.filter((header) => allTableHeaders().includes(header)));
@@ -6637,9 +6661,14 @@ async function init() {
     button.addEventListener("click", () => setView(button.dataset.view));
   });
 
+  document.querySelectorAll("[data-admin-section]").forEach((button) => {
+    button.addEventListener("click", () => setAdminSection(button.dataset.adminSection));
+  });
+
   renderColumnMenu();
   bindTableScrollbars();
   render();
+  setAdminSection(initialAdminSection);
   setView(initialView);
 }
 

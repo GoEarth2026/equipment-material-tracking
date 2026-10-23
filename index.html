@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Equipment &amp; Material Tracking</title>
-    <link rel="stylesheet" href="./styles.css?v=submittal-workflow2" />
+    <link rel="stylesheet" href="./styles.css?v=admin-sections1" />
   </head>
   <body>
     <section class="auth-gate" id="authGate" hidden>
@@ -38,7 +38,6 @@
           <button class="nav-tab" data-view="log" type="button">Material Log</button>
           <button class="nav-tab" data-view="procurement" type="button">Procurement</button>
           <button class="nav-tab" data-view="reports" type="button">Reports</button>
-          <button class="nav-tab" data-view="documents" type="button">Documents</button>
           <button class="nav-tab" data-view="import" type="button">Import Log</button>
           <button class="nav-tab" data-view="development" type="button">Development Notes</button>
           <button class="nav-tab" data-view="admin" type="button">Admin</button>
@@ -153,60 +152,6 @@
           </div>
         </section>
 
-        <section class="view" id="documentsView">
-          <div class="documents-layout">
-            <section class="panel document-panel">
-              <div class="section-heading">
-                <h3>Submittal Forms</h3>
-                <span id="templateCount"></span>
-              </div>
-              <form class="document-upload-form" id="templateUploadForm">
-                <input id="templateNameInput" type="text" placeholder="Form name" required />
-                <input id="templateFileInput" type="file" accept="application/pdf,.pdf" required />
-                <button class="ghost-button" type="submit">Upload Form</button>
-              </form>
-              <div class="admin-list" id="templateList"></div>
-            </section>
-
-            <section class="panel document-panel">
-              <div class="section-heading"><h3>Project Submittal Setup</h3></div>
-              <form class="project-template-form" id="projectTemplateForm">
-                <label>Project<select id="documentProjectSelect"></select></label>
-                <label>Assigned Form<select id="projectTemplateSelect"></select></label>
-                <label>Submittal Numbering<select id="submittalNumberingMethod"><option value="general">General Sequence (001)</option><option value="specification">Specification Section (15092-001)</option></select></label>
-                <label>Contractor<input id="submittalContractor" type="text" /></label>
-                <label>Contractor Project No.<input id="submittalContractorProject" type="text" /></label>
-                <label>Project Location<input id="submittalProjectLocation" type="text" /></label>
-                <label>Engineer<input id="submittalEngineer" type="text" /></label>
-                <label>Engineer Project No.<input id="submittalEngineerProject" type="text" /></label>
-                <label>Engineer Attention<input id="submittalEngineerAttention" type="text" /></label>
-                <label>Engineer Address<textarea id="submittalEngineerAddress" rows="2"></textarea></label>
-                <button class="ghost-button" type="submit">Save Project Setup</button>
-              </form>
-            </section>
-          </div>
-          <section class="panel distribution-panel">
-            <div class="section-heading"><h3>Submittal Distribution List</h3><span id="distributionContactCount"></span></div>
-            <form class="distribution-contact-form" id="distributionContactForm">
-              <label>Name<input id="distributionContactName" type="text" required /></label>
-              <label>Team<select id="distributionContactTeam"><option value="Engineering">Engineering</option><option value="Construction Management">Construction Management</option><option value="Contractor">Contractor</option><option value="Other">Other</option></select></label>
-              <label>Company<input id="distributionContactCompany" type="text" /></label>
-              <label>Email<input id="distributionContactEmail" type="email" required /></label>
-              <label>Phone<input id="distributionContactPhone" type="tel" /></label>
-              <label>Email Field<select id="distributionContactRecipientType"><option value="to">To</option><option value="cc">CC</option></select></label>
-              <div class="distribution-form-actions">
-                <button class="ghost-button primary-action" id="distributionContactSubmit" type="submit">Add Contact</button>
-                <button class="ghost-button" id="distributionContactCancel" type="button" hidden>Cancel</button>
-              </div>
-            </form>
-            <div class="distribution-contact-list" id="distributionContactList"></div>
-          </section>
-          <section class="panel submittal-log-panel">
-            <div class="section-heading"><h3>Project Submittal Log</h3><span id="submittalLogCount"></span></div>
-            <div class="table-shell"><table class="report-table"><thead id="submittalLogHead"></thead><tbody id="submittalLogBody"></tbody></table></div>
-          </section>
-        </section>
-
         <section class="view" id="procurementView">
           <div class="procurement-board" id="procurementBoard"></div>
         </section>
@@ -314,7 +259,15 @@
         </section>
 
         <section class="view" id="adminView">
-          <div class="admin-grid">
+          <div class="admin-section-tabs" role="tablist" aria-label="Admin sections">
+            <button class="admin-section-tab is-active" data-admin-section="projects" role="tab" aria-selected="true" type="button">Projects</button>
+            <button class="admin-section-tab" data-admin-section="lists" role="tab" aria-selected="false" type="button">Lists</button>
+            <button class="admin-section-tab" data-admin-section="submittals" role="tab" aria-selected="false" type="button">Submittals</button>
+            <button class="admin-section-tab" data-admin-section="access" role="tab" aria-selected="false" type="button">Access &amp; Recovery</button>
+          </div>
+
+          <div class="admin-section-pane is-active" data-admin-pane="projects" role="tabpanel">
+            <div class="admin-grid admin-grid-single">
             <section class="panel admin-panel">
               <div class="section-heading">
                 <h3>Projects</h3>
@@ -326,7 +279,11 @@
               </form>
               <div class="admin-list" id="projectList"></div>
             </section>
+            </div>
+          </div>
 
+          <div class="admin-section-pane" data-admin-pane="lists" role="tabpanel" hidden>
+            <div class="admin-grid">
             <section class="panel admin-panel">
               <div class="section-heading">
                 <h3>Suppliers</h3>
@@ -366,7 +323,65 @@
               </form>
               <div class="admin-list" id="categoryList"></div>
             </section>
+            </div>
+          </div>
 
+          <div class="admin-section-pane" data-admin-pane="submittals" role="tabpanel" hidden>
+            <div class="documents-layout">
+              <section class="panel document-panel">
+                <div class="section-heading">
+                  <h3>Submittal Forms</h3>
+                  <span id="templateCount"></span>
+                </div>
+                <form class="document-upload-form" id="templateUploadForm">
+                  <input id="templateNameInput" type="text" placeholder="Form name" required />
+                  <input id="templateFileInput" type="file" accept="application/pdf,.pdf" required />
+                  <button class="ghost-button" type="submit">Upload Form</button>
+                </form>
+                <div class="admin-list" id="templateList"></div>
+              </section>
+
+              <section class="panel document-panel">
+                <div class="section-heading"><h3>Project Submittal Setup</h3></div>
+                <form class="project-template-form" id="projectTemplateForm">
+                  <label>Project<select id="documentProjectSelect"></select></label>
+                  <label>Assigned Form<select id="projectTemplateSelect"></select></label>
+                  <label>Submittal Numbering<select id="submittalNumberingMethod"><option value="general">General Sequence (001)</option><option value="specification">Specification Section (15092-001)</option></select></label>
+                  <label>Contractor<input id="submittalContractor" type="text" /></label>
+                  <label>Contractor Project No.<input id="submittalContractorProject" type="text" /></label>
+                  <label>Project Location<input id="submittalProjectLocation" type="text" /></label>
+                  <label>Engineer<input id="submittalEngineer" type="text" /></label>
+                  <label>Engineer Project No.<input id="submittalEngineerProject" type="text" /></label>
+                  <label>Engineer Attention<input id="submittalEngineerAttention" type="text" /></label>
+                  <label>Engineer Address<textarea id="submittalEngineerAddress" rows="2"></textarea></label>
+                  <button class="ghost-button" type="submit">Save Project Setup</button>
+                </form>
+              </section>
+            </div>
+            <section class="panel distribution-panel">
+              <div class="section-heading"><h3>Submittal Distribution List</h3><span id="distributionContactCount"></span></div>
+              <form class="distribution-contact-form" id="distributionContactForm">
+                <label>Name<input id="distributionContactName" type="text" required /></label>
+                <label>Team<select id="distributionContactTeam"><option value="Engineering">Engineering</option><option value="Construction Management">Construction Management</option><option value="Contractor">Contractor</option><option value="Other">Other</option></select></label>
+                <label>Company<input id="distributionContactCompany" type="text" /></label>
+                <label>Email<input id="distributionContactEmail" type="email" required /></label>
+                <label>Phone<input id="distributionContactPhone" type="tel" /></label>
+                <label>Email Field<select id="distributionContactRecipientType"><option value="to">To</option><option value="cc">CC</option></select></label>
+                <div class="distribution-form-actions">
+                  <button class="ghost-button primary-action" id="distributionContactSubmit" type="submit">Add Contact</button>
+                  <button class="ghost-button" id="distributionContactCancel" type="button" hidden>Cancel</button>
+                </div>
+              </form>
+              <div class="distribution-contact-list" id="distributionContactList"></div>
+            </section>
+            <section class="panel submittal-log-panel">
+              <div class="section-heading"><h3>Project Submittal Log</h3><span id="submittalLogCount"></span></div>
+              <div class="table-shell"><table class="report-table"><thead id="submittalLogHead"></thead><tbody id="submittalLogBody"></tbody></table></div>
+            </section>
+          </div>
+
+          <div class="admin-section-pane" data-admin-pane="access" role="tabpanel" hidden>
+            <div class="admin-grid">
             <section class="panel admin-panel" id="userAccessPanel">
               <div class="section-heading">
                 <h3>User Access</h3>
@@ -382,6 +397,7 @@
               </div>
               <div class="admin-list" id="backupList"></div>
             </section>
+            </div>
           </div>
         </section>
 
@@ -529,6 +545,6 @@
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
     <script src="./supabase-config.js"></script>
-    <script src="./app.js?v=submittal-distribution1"></script>
+    <script src="./app.js?v=admin-sections1"></script>
   </body>
 </html>
