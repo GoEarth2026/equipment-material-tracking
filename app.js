@@ -5590,6 +5590,17 @@ function submittalPackageFileName() {
   return `${number} ${safeDescription || "Submittal"} (Submitted).pdf`;
 }
 
+function submittalFormNumberParts() {
+  const fullNumber = clean(els.submittalNumber.value);
+  const sectionNumber = specificationParts(els.submittalSpec.value).number;
+  const sequenceMatch = fullNumber.match(/-(\d+)$/);
+  return {
+    fullNumber,
+    sectionNumber: sectionNumber || clean(els.submittalSpec.value),
+    sequenceNumber: sequenceMatch ? sequenceMatch[1] : fullNumber,
+  };
+}
+
 async function refreshSharedSubmittals(required = false) {
   if (!state.supabaseClient) return;
   const { data, error } = await state.supabaseClient
@@ -5754,13 +5765,14 @@ async function buildSubmittalPackage() {
   const pdf = await PDFLib.PDFDocument.load(templateBytes);
   const form = pdf.getForm();
   const settings = project.submittalSettings || {};
+  const formNumber = submittalFormNumberParts();
   setPdfText(form, "PROJECT", project.name);
   setPdfText(form, "CONTRACTORS PROJ NO", settings.contractorProjectNo);
   setPdfText(form, "CONTRACTOR", settings.contractor);
   setPdfText(form, "ENGINEERS PROJ NO", settings.engineerProjectNo);
   setPdfText(form, "ENGINEER", settings.engineer);
-  setPdfText(form, "SPECIFICATION SECTION", els.submittalSpec.value);
-  setPdfText(form, "SEQUENTIAL NUMBER", els.submittalNumber.value);
+  setPdfText(form, "SPECIFICATION SECTION", formNumber.sectionNumber);
+  setPdfText(form, "SEQUENTIAL NUMBER", formNumber.sequenceNumber);
   setPdfText(form, "DESCRIPTION", els.submittalDescription.value);
   setPdfText(form, "MANUFACTURER", els.submittalManufacturer.value);
   const deviations = clean(els.submittalDeviations.value).split(/\n+/).filter(Boolean);
@@ -5794,8 +5806,8 @@ async function buildSubmittalPackage() {
   setPdfText(form, "ENGINEER’S PROJECT # (1)", settings.engineerProjectNo);
   setPdfText(form, "Text3", project.name);
   setPdfText(form, "PROJECT LOCATION", settings.projectLocation);
-  setPdfText(form, "REVISION #", els.submittalSpec.value);
-  setPdfText(form, "REVISION # (1)", els.submittalNumber.value);
+  setPdfText(form, "REVISION #", formNumber.sectionNumber);
+  setPdfText(form, "REVISION # (1)", formNumber.fullNumber);
   setPdfText(form, "Text20", els.submittalRevision.value);
   setPdfText(form, "PRODUCT NAME / DESCRIPTION", els.submittalDescription.value);
   setPdfText(form, "REVISION # (3)", els.submittalProvider.value);
