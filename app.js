@@ -4579,8 +4579,15 @@ function openItemDetails(row) {
 }
 
 function openSubmittalParentDetails(submittalId) {
-  const record = state.submittals.find((item) => item.id === submittalId);
-  const project = state.projects.find((item) => item.id === record?.projectId);
+  let record = null;
+  let project = null;
+  state.projects.some((candidate) => {
+    const match = submittalParentRecordsForProject(candidate).find((item) => item.id === submittalId);
+    if (!match) return false;
+    record = match;
+    project = candidate;
+    return true;
+  });
   if (!record || !project) return;
   const childKeySet = new Set(record.rowKeys || []);
   const childRows = loadRowsForProject(project).filter((row) => childKeySet.has(rowKey(row)));
@@ -4713,6 +4720,43 @@ function reportProjects() {
   return state.projects.filter((project) => !project.archived || project.id === state.activeProjectId);
 }
 
+function usesKeeneSubmittalBackfill(project) {
+  return /KEENE|MARTEL/.test(normalizeKey(project?.name));
+}
+
+function submittalParentRecordsForProject(project) {
+  if (!usesKeeneSubmittalBackfill(project)) {
+    return state.submittals.filter((record) => record.projectId === project.id);
+  }
+  const grouped = new Map();
+  loadRowsForProject(project).forEach((row) => {
+    const number = clean(row[FIELD.submittal]);
+    if (!number) return;
+    const key = normalizeKey(number);
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        id: `keene-log-${project.id}-${key}`,
+        projectId: project.id,
+        number,
+        specificationSection: clean(row[FIELD.spec]),
+        description: specificationParts(row[FIELD.spec]).title || clean(row[FIELD.item]),
+        status: clean(row[FIELD.status]) || "Submitted",
+        rowKeys: [],
+        createdAt: "",
+        source: "material-log-backfill",
+      });
+    }
+    const parent = grouped.get(key);
+    parent.rowKeys.push(rowKey(row));
+    if (!parent.specificationSection && clean(row[FIELD.spec])) parent.specificationSection = clean(row[FIELD.spec]);
+    const submittedSerial = reportNumeric(row[FIELD.dateSubmitted]);
+    if (submittedSerial !== null && (!parent.createdAt || submittedSerial > Number(parent.createdAt))) {
+      parent.createdAt = String(submittedSerial);
+    }
+  });
+  return [...grouped.values()];
+}
+
 function selectedReportProjects() {
   const selected = els.reportProject.value;
   const projects = reportProjects();
@@ -4820,8 +4864,8 @@ function genericReportDefinition() {
     const selectedProjects = selectedReportProjects();
     const projectById = new Map(selectedProjects.map((project) => [project.id, project]));
     const selectedProvider = clean(els.reportProvider.value || "all");
-    const rows = state.submittals
-      .filter((record) => projectById.has(record.projectId))
+    const rows = selectedProjects
+      .flatMap((project) => submittalParentRecordsForProject(project))
       .map((record) => {
         const project = projectById.get(record.projectId);
         const projectRows = loadRowsForProject(project);
