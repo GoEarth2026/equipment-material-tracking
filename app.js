@@ -272,6 +272,7 @@ const els = {
   submittalDialogSummary: document.querySelector("#submittalDialogSummary"),
   submittalSelectedItems: document.querySelector("#submittalSelectedItems"),
   submittalTemplateName: document.querySelector("#submittalTemplateName"),
+  submittalDialogNumberingMethod: document.querySelector("#submittalDialogNumberingMethod"),
   submittalNumber: document.querySelector("#submittalNumber"),
   submittalRevision: document.querySelector("#submittalRevision"),
   submittalSpec: document.querySelector("#submittalSpec"),
@@ -761,6 +762,7 @@ function updateSharedEditingControls() {
     els.bulkNoteInitials,
     els.bulkNoteText,
     els.submittalNumber,
+    els.submittalDialogNumberingMethod,
     els.submittalRevision,
     els.submittalSpec,
     els.submittalProvider,
@@ -5544,10 +5546,9 @@ function specificationParts(value) {
   };
 }
 
-function nextSubmittalNumber(project, specificationText = "") {
-  const settings = project?.submittalSettings || {};
+function nextSubmittalNumber(project, specificationText = "", method = project?.submittalSettings?.numberingMethod) {
   const projectSubmittals = state.submittals.filter((item) => item.projectId === project?.id);
-  if (settings.numberingMethod === "specification") {
+  if (method === "specification") {
     const sectionNumber = specificationParts(specificationText).number;
     if (!sectionNumber) return "";
     const sectionSubmittals = projectSubmittals.filter((item) => (
@@ -5570,12 +5571,13 @@ function nextSubmittalNumber(project, specificationText = "") {
 
 function updateAutomaticSubmittalNumber() {
   const project = activeProject();
-  const usesSpecification = project?.submittalSettings?.numberingMethod === "specification";
+  const method = els.submittalDialogNumberingMethod.value;
+  const usesSpecification = method === "specification";
   const sectionNumber = specificationParts(els.submittalSpec.value).number;
   els.submittalSpec.setCustomValidity(usesSpecification && !sectionNumber
     ? "Enter a five-digit specification section or a six-digit section followed by a decimal and two digits."
     : "");
-  if (usesSpecification) els.submittalNumber.value = nextSubmittalNumber(project, els.submittalSpec.value);
+  els.submittalNumber.value = nextSubmittalNumber(project, els.submittalSpec.value, method);
 }
 
 function submittalPackageFileName() {
@@ -5696,7 +5698,11 @@ async function openCreateSubmittal() {
   els.submittalSelectedItems.innerHTML = rows.map((row) => `<div><strong>${escapeHtml(clean(row[FIELD.item]) || "Untitled item")}</strong><span>${escapeHtml(clean(row[FIELD.tag]))}</span></div>`).join("");
   els.submittalTemplateName.value = template.name;
   els.submittalSpec.value = specs.join(", ");
-  els.submittalNumber.value = nextSubmittalNumber(project, els.submittalSpec.value);
+  const isKeeneProject = /KEENE|MARTEL/.test(normalizeKey(project.name));
+  els.submittalDialogNumberingMethod.value = isKeeneProject && specificationParts(els.submittalSpec.value).number
+    ? "specification"
+    : (project.submittalSettings?.numberingMethod || "general");
+  els.submittalNumber.value = nextSubmittalNumber(project, els.submittalSpec.value, els.submittalDialogNumberingMethod.value);
   updateAutomaticSubmittalNumber();
   els.submittalRevision.value = "0";
   els.submittalProvider.value = providers.join(", ");
@@ -5853,6 +5859,7 @@ async function generateSubmittal(event) {
       projectId: state.activeProjectId,
       rowKeys: [...state.submittalDraft.rowKeys],
       number: clean(els.submittalNumber.value),
+      numberingMethod: els.submittalDialogNumberingMethod.value,
       revision: clean(els.submittalRevision.value),
       specificationSection: clean(els.submittalSpec.value),
       specificationNumber: specificationParts(els.submittalSpec.value).number,
@@ -6217,6 +6224,7 @@ async function init() {
   els.projectTemplateForm.addEventListener("submit", saveProjectTemplateSetup);
   els.submittalForm.addEventListener("submit", generateSubmittal);
   els.submittalSpec.addEventListener("input", updateAutomaticSubmittalNumber);
+  els.submittalDialogNumberingMethod.addEventListener("change", updateAutomaticSubmittalNumber);
   els.submittalProductFiles.addEventListener("change", () => {
     addSubmittalAttachments(els.submittalProductFiles.files || []);
   });
