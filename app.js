@@ -78,6 +78,7 @@ const state = {
   supabaseClient: null,
   cloudReady: false,
   cloudSaveTimer: null,
+  pendingSaveTimer: null,
   cloudRetryTimer: null,
   cloudUpdatedAt: null,
   savePending: false,
@@ -1110,7 +1111,10 @@ function queueSharedSave() {
   if (!canEditSharedData()) return;
   state.savePending = true;
   setSyncStatus("Saving...", "pending");
-  localStorage.setItem(PENDING_SAVE_PREF_KEY, JSON.stringify(normalizeSharedStateForSave(collectSharedState())));
+  clearTimeout(state.pendingSaveTimer);
+  state.pendingSaveTimer = setTimeout(() => {
+    localStorage.setItem(PENDING_SAVE_PREF_KEY, JSON.stringify(normalizeSharedStateForSave(collectSharedState())));
+  }, 50);
   clearTimeout(state.cloudSaveTimer);
   state.cloudSaveTimer = setTimeout(() => {
     saveSharedState();
@@ -1120,6 +1124,8 @@ function queueSharedSave() {
 async function saveSharedState() {
   if (!state.supabaseClient) return;
   try {
+    clearTimeout(state.pendingSaveTimer);
+    state.pendingSaveTimer = null;
     const currentState = normalizeSharedStateForSave(collectSharedState());
     const { data: existingData, error: readError } = await state.supabaseClient
       .from("equipment_material_app_state")
@@ -1495,30 +1501,6 @@ function leadTimeDays(value) {
   return Math.round(highValue);
 }
 
-function shouldAutosaveTextInput(header) {
-  if (AUTOCOMPLETE_FILTERS.has(header)) return false;
-  return ![
-    FIELD.quantity,
-    FIELD.unitPricePo,
-    FIELD.qtyDelivered,
-    FIELD.dateSubmitted,
-    FIELD.submittalReturnExpected,
-    FIELD.submittalReturnActual,
-    FIELD.submittalReviewExpected,
-    FIELD.submittalReviewActual,
-    FIELD.scheduledRelease,
-    FIELD.released,
-    FIELD.lead,
-    FIELD.delivery,
-    FIELD.required,
-    FIELD.critical,
-    FIELD.delivered,
-    FIELD.deliveries,
-    FIELD.remaining,
-    FIELD.notes,
-  ].includes(header);
-}
-
 function rowDeliveries(row) {
   if (!Array.isArray(row._deliveries)) row._deliveries = [];
   return row._deliveries;
@@ -1766,8 +1748,6 @@ function addItem() {
   state.logSort = { column: null, direction: "asc" };
   saveLogControls();
   state.filtered = state.rows.filter(matchesFilters);
-  renderColumnMenu();
-  render();
   setView("log");
 }
 
@@ -1803,8 +1783,6 @@ function insertItemNearRow(targetRowKey, position) {
   saveRowOrder();
   clearLogPlacementFilters();
   state.filtered = state.rows.filter(matchesFilters);
-  renderColumnMenu();
-  render();
   setView("log");
 }
 
@@ -1821,8 +1799,7 @@ function removeItem(rowKeyValue) {
   saveAddedItems();
   saveRowOrder();
   state.filtered = state.rows.filter(matchesFilters);
-  renderColumnMenu();
-  render();
+  renderLog();
 }
 
 function formatNoteTimestamp(date = new Date()) {
@@ -2877,7 +2854,13 @@ function matchesFilters(row) {
 
 function applyFilters() {
   state.filtered = state.rows.filter(matchesFilters);
-  render();
+  if (state.activeView === "dashboard") {
+    renderDashboard();
+  } else if (state.activeView === "procurement") {
+    renderProcurement();
+  } else {
+    renderLog();
+  }
 }
 
 function renderKpis(rows) {
@@ -3875,28 +3858,16 @@ function commitEditableCell(cell) {
   if (!row) return false;
   const header = cell.dataset.editColumn;
   const value = normalizeEditedValue(header, cell.textContent);
+  if (String(row[header] ?? "") === String(value ?? "")) return true;
   saveCellEdit(row, header, value);
   state.filtered = state.rows.filter(matchesFilters);
-  renderAdmin();
-  populateGlobalFilters();
-  renderColumnMenu();
+  if ([FIELD.provider, FIELD.area, FIELD.status].includes(header)) populateGlobalFilters();
   renderLog();
-  renderDashboard();
-  renderProcurement();
   return true;
 }
 
 function bindEditableCells() {
   els.logBody.querySelectorAll("[data-edit-column]").forEach((cell) => {
-    cell.addEventListener("input", () => {
-      if (!canEditSharedData()) return;
-      const header = cell.dataset.editColumn;
-      if (!shouldAutosaveTextInput(header)) return;
-      const row = state.rows.find((candidate) => rowKey(candidate) === cell.dataset.editRow);
-      if (!row) return;
-      saveCellEdit(row, header, normalizeEditedValue(header, cell.textContent));
-    });
-
     cell.addEventListener("keydown", (event) => {
       if (!canEditSharedData()) return;
       if (event.key === "Enter") {
@@ -3964,6 +3935,7 @@ function saveProviderInput(input) {
     return false;
   }
   input.value = canonical || "";
+  if (clean(row[FIELD.provider]) === clean(canonical)) return true;
   saveCellEdit(row, FIELD.provider, canonical);
   state.filtered = state.rows.filter(matchesFilters);
   renderAdmin();
@@ -4012,6 +3984,7 @@ function saveCategoryInput(input) {
     return false;
   }
   input.value = canonical || "";
+  if (clean(row[FIELD.category]) === clean(canonical)) return true;
   saveCellEdit(row, FIELD.category, canonical);
   state.filtered = state.rows.filter(matchesFilters);
   populateGlobalFilters();
@@ -6309,6 +6282,20 @@ function render() {
   updateSharedEditingControls();
 }
 
+function renderView(view) {
+  if (!state.data) return;
+  if (view === "dashboard") renderDashboard();
+  if (view === "log") renderLog();
+  if (view === "procurement") renderProcurement();
+  if (view === "reports") renderProviderReport();
+  if (view === "development") renderDevelopmentNotes();
+  if (view === "admin") {
+    renderAdmin();
+    renderDocuments();
+  }
+  updateSharedEditingControls();
+}
+
 function setSidebarHidden(hidden) {
   els.appShell.classList.toggle("is-sidebar-hidden", hidden);
   els.sidebarToggle.textContent = hidden ? "Show Menu" : "Hide Menu";
@@ -6372,6 +6359,7 @@ function setView(view) {
     els.columnMenu.hidden = true;
     els.columnToggle.setAttribute("aria-expanded", "false");
   }
+  renderView(view);
 }
 
 async function init() {
@@ -6451,8 +6439,12 @@ async function init() {
   populateGlobalFilters();
   populateProjectSelect();
 
-  [els.search, els.status, els.area, els.provider, els.timing].forEach((control) => {
-    control.addEventListener("input", applyFilters);
+  let searchFilterTimer = null;
+  els.search.addEventListener("input", () => {
+    clearTimeout(searchFilterTimer);
+    searchFilterTimer = setTimeout(applyFilters, 120);
+  });
+  [els.status, els.area, els.provider, els.timing].forEach((control) => {
     control.addEventListener("change", applyFilters);
   });
 
